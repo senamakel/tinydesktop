@@ -1,15 +1,38 @@
-# Template TinyBus Module
+# tinydesktop TinyBus Module
 
-This package contains the native `template` module for TinyBus module ABI
+This package contains the native `tinydesktop` module for TinyBus module ABI
 v1. Install only the archive matching the host operating system and
 architecture.
 
-The module claims `ai.tinyhumans.template.Greeting`, serves the object at
-`/ai/tinyhumans/template/Greeting`, and provides the `Greet` method. The
-method accepts a `GreetRequest` and returns a `GreetResponse` carrying
-`Hello, <name>!`; empty names are rejected. Both payload types, the interface
-name, the object path, and the member names are published as the `template-bus`
-crate, so a host names them from a library rather than by string literal.
+The module claims `ai.tinyhumans.tinydesktop.Desktop`, serves the object at
+`/ai/tinyhumans/tinydesktop/Desktop`, and provides fifty-four members covering
+accessibility-tree observation, ref-addressed interaction, synthesized keyboard
+and mouse input, application and window management, the pasteboard,
+notifications, waits, and status. Every member takes one request payload — or
+none — and returns a `DesktopResponse` envelope carrying either the command's
+data or a structured error with its code, suggestion, and recovery hint. All
+payload types, the interface name, the object path, and the member names are
+published as the `tinydesktop-bus` crate, so a host names them from a library
+rather than by string literal.
+
+The module reads its configuration from the loader as a JSON object:
+`session_id` and `trace_path` (strings), `trace_strict` and `headed`
+(booleans). All are optional.
+
+## Permissions
+
+Desktop automation needs permissions a person grants: accessibility access for
+anything that reads or drives another application's tree, and screen recording
+for captures. The module checks before it acts, so a missing permission is a
+`PERM_DENIED` naming the setting to change rather than an empty tree that looks
+like an application with no buttons. Call `Permissions` to read the current
+state; it prompts only when explicitly asked to.
+
+macOS and Windows have full accessibility backends. Linux loads and answers but
+implements no surfaces yet: observation there fails with
+`PLATFORM_NOT_SUPPORTED`.
+
+## Installing
 
 The archive contains one `.so`, `.dylib`, or `.dll` plus `modules.toml`. Keep
 those files together when copying them into a TinyBus module directory. The
@@ -22,10 +45,11 @@ archive. Install directly from a tagged release with:
 
 ```sh
 tinybus modules load-github \
-  https://github.com/tinyhumansai/rust-template/releases/tag/v0.1.5 \
-  template-0.1.5-ubuntu-24.04-x86_64.tar.gz \
+  https://github.com/tinyhumansai/tinydesktop/releases/tag/v0.2.1 \
+  tinydesktop-0.2.1-ubuntu-24.04-x86_64.tar.gz \
   <archive-sha256>
 ```
 
-TinyBus modules are trusted in-process code. Install release artifacts only
-from a trusted source and restart the host after replacing a loaded module.
+TinyBus modules are trusted in-process code, and this one can read any window on
+the machine and drive any application on it. Install release artifacts only from
+a trusted source and restart the host after replacing a loaded module.
