@@ -1,0 +1,61 @@
+[package]
+name = "tinydesktop"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Native desktop automation — accessibility-tree observation and interaction — as an installable TinyBus module."
+documentation = "https://docs.rs/tinydesktop"
+readme = "../../README.md"
+keywords = ["tinybus", "module", "accessibility", "automation", "desktop"]
+categories = ["development-tools", "os"]
+publish = false
+
+[lib]
+# Keep the ordinary Rust library for tests and downstream reuse while also
+# producing the native module artifact that TinyBus loads at runtime.
+crate-type = ["rlib", "cdylib"]
+
+[dependencies]
+# The wire contract: member names, request payloads, the response envelope, and
+# the contract version. Re-exported wholesale from `src/lib.rs` so a consumer
+# takes one dependency rather than two, and so `tinydesktop::SnapshotRequest`
+# and `tinydesktop_bus::SnapshotRequest` are the same type.
+tinydesktop-bus = { workspace = true }
+tinybus = { workspace = true }
+tinybus-module = { workspace = true }
+thiserror = { workspace = true }
+# Command replies are `serde_json::Value` the whole way through: the engine
+# builds them and the envelope carries them without this crate reshaping them.
+serde_json = { workspace = true }
+# The desktop automation engine. Platform-neutral; the accessibility backend
+# arrives through the target-specific dependencies below.
+agent-desktop-core = { workspace = true }
+# `spawn_blocking`, so a tree walk that takes a second does not stall the
+# connection's dispatch task for every other caller. See `src/tinybus_module/`.
+tokio = { workspace = true }
+
+# One accessibility backend per platform, selected at compile time. `linux`
+# currently implements no surfaces and fails closed with
+# `PLATFORM_NOT_SUPPORTED`; it is taken anyway so the module builds, loads, and
+# answers with a structured error there rather than failing to link.
+[target.'cfg(target_os = "macos")'.dependencies]
+agent-desktop-macos = { workspace = true }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+agent-desktop-windows = { workspace = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+agent-desktop-linux = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }
+# The GitHub release verifier passes an explicit empty module configuration.
+serde_json = { workspace = true }
+
+[features]
+default = []
+
+[lints]
+workspace = true

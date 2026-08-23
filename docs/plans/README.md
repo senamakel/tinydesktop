@@ -19,4 +19,5 @@ Prefer tasks that can be implemented and reviewed independently. Include short
 code snippets when they remove ambiguity, but do not paste entire future files
 into the plan.
 
-See [`example-retry-policy.md`](example-retry-policy.md) for a test-first sample.
+See [`desktop-module-contract.md`](desktop-module-contract.md) for a worked
+example.

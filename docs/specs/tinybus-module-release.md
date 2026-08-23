@@ -10,10 +10,10 @@ distributable without also shipping the TinyBus host runtime.
 - The library builds as both an `rlib` and a native `cdylib`.
 - The `cdylib` exports TinyBus module ABI v1, an embedded manifest, and the
   initialization entrypoint.
-- The example module provides `ai.tinyhumans.template.Greeting.Greet` at
-  `/ai/tinyhumans/template/Greeting`.
+- The module provides the fifty-four members of
+  `ai.tinyhumans.tinydesktop.Desktop` at `/ai/tinyhumans/tinydesktop/Desktop`.
 - Each release archive is named
-  `template-<version>-<platform>.<extension>` and contains only this
+  `tinydesktop-<version>-<platform>.<extension>` and contains only this
   module, its SHA-256 `modules.toml`, license, and installation documentation.
 - Each GitHub release publishes a separate `checksum.toml` mapping every
   archive filename to its SHA-256 digest for TinyBus's release loader.
@@ -29,5 +29,7 @@ CI exercises the bus interface through TinyBus's in-memory transport, enforces
 90% line coverage in every source file, and builds the `cdylib`. The release
 workflow builds each native module from the tagged source and records its exact
 digest in the adjacent allowlist. After publishing, it downloads the Ubuntu
-x86_64 archive through TinyBus's GitHub release API and calls `Greet` over an
-in-memory bus.
+x86_64 archive through TinyBus's GitHub release API and calls `Version` over an
+in-memory bus. `Version` is chosen because it needs no granted permission and
+touches no other application, so the gate tests the artifact rather than the
+runner's configuration.
