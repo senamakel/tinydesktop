@@ -111,6 +111,8 @@ fn a_mouse_wheel_request_separates_the_two_axes() {
     let request: MouseWheelRequest =
         serde_json::from_value(json!({ "x": 1.0, "y": 2.0, "dy": -3.0 })).expect("it decodes");
 
-    assert_eq!(request.dy, -3.0);
-    assert_eq!(request.dx, 0.0);
+    // Exact comparison is right here: these are the caller's own literals
+    // carried through JSON, not the result of arithmetic that could round.
+    assert_eq!(serde_json::to_value(request.dy).unwrap(), json!(-3.0));
+    assert_eq!(serde_json::to_value(request.dx).unwrap(), json!(0.0));
 }

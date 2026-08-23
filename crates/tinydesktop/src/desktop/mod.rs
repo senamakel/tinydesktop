@@ -197,13 +197,12 @@ impl Desktop {
             return Err(Error::ConfigNotAnObject);
         };
 
-        let mut desktop = Self::default();
-        desktop.session_id = text(object.get("session_id"), "session_id")?;
-        desktop.trace_path = text(object.get("trace_path"), "trace_path")?.map(PathBuf::from);
-        desktop.trace_strict = flag(object.get("trace_strict"), "trace_strict")?;
-        desktop.headed = flag(object.get("headed"), "headed")?;
-
-        Ok(desktop)
+        Ok(Self {
+            session_id: text(object.get("session_id"), "session_id")?,
+            trace_path: text(object.get("trace_path"), "trace_path")?.map(PathBuf::from),
+            trace_strict: flag(object.get("trace_strict"), "trace_strict")?,
+            headed: flag(object.get("headed"), "headed")?,
+        })
     }
 
     /// The session refs allocated through this `Desktop` belong to.
