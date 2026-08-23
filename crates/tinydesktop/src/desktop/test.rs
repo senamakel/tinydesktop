@@ -541,7 +541,11 @@ fn every_member_answers_in_the_envelope() {
         assert_eq!(reply.ok, reply.data.is_some());
         assert_eq!(!reply.ok, reply.error.is_some());
         if let Some(error) = reply.error {
-            assert!(!error.code.is_empty(), "{} gave an empty code", reply.command);
+            assert!(
+                !error.code.is_empty(),
+                "{} gave an empty code",
+                reply.command
+            );
             assert!(!error.message.is_empty());
         }
     }
@@ -641,8 +645,8 @@ fn a_headless_desktop_refuses_the_members_that_would_move_the_real_cursor() {
 fn a_notification_mutation_is_refused_while_headless() {
     // Opening the notification surface takes focus, so a headless run cannot do
     // it — and finds that out before it acts, not after.
-    let reply = Desktop::new()
-        .dismiss_all_notifications(bus::DismissAllNotificationsRequest::default());
+    let reply =
+        Desktop::new().dismiss_all_notifications(bus::DismissAllNotificationsRequest::default());
 
     assert!(!reply.ok);
 }

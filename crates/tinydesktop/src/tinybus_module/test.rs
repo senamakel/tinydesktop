@@ -263,8 +263,7 @@ fn the_wire_sweep_covers_every_member_except_the_one_with_no_safe_input() {
 }
 
 #[tokio::test]
-async fn every_member_decodes_its_payload_and_answers_in_the_envelope()
--> tinybus::Result<()> {
+async fn every_member_decodes_its_payload_and_answers_in_the_envelope() -> tinybus::Result<()> {
     let bus = MemoryBus::new();
     Broker::new().spawn(bus.clone());
 
