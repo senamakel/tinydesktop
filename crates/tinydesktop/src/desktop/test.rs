@@ -15,8 +15,23 @@ use tinydesktop_bus as bus;
 
 use super::{Desktop, convert, permission::Need, permission, reply};
 use agent_desktop_core::{
-    AdapterError, AppError, DeliverySemantics, ErrorCode, PermissionReport,
+    AdapterError, AppError, DeliverySemantics, ErrorCode, PermissionReport, PermissionState,
 };
+
+/// A report denying `accessibility`, `screen_recording`, or both.
+fn denying(accessibility: bool, screen_recording: bool) -> PermissionReport {
+    let denied = || PermissionState::Denied {
+        suggestion: "Grant it in System Settings".to_owned(),
+    };
+    let mut report = PermissionReport::default();
+    if accessibility {
+        report.accessibility = denied();
+    }
+    if screen_recording {
+        report.screen_recording = denied();
+    }
+    report
+}
 
 #[test]
 fn a_default_desktop_is_sessionless_untraced_and_headless() {
@@ -180,8 +195,7 @@ fn a_command_that_fails_still_names_itself_in_the_envelope() {
 
 #[test]
 fn a_denied_accessibility_permission_is_reported_before_the_command_runs() {
-    let mut report = PermissionReport::default();
-    report.accessibility = agent_desktop_core::PermissionState::Denied;
+    let report = denying(true, false);
 
     let error = permission::preflight(Need::Accessibility, &report)
         .expect_err("a denied permission must not be ignored");
@@ -197,19 +211,12 @@ fn a_denied_accessibility_permission_is_reported_before_the_command_runs() {
 
 #[test]
 fn a_need_of_nothing_passes_a_report_that_denies_everything() {
-    let mut report = PermissionReport::default();
-    report.accessibility = agent_desktop_core::PermissionState::Denied;
-    report.screen_recording = agent_desktop_core::PermissionState::Denied;
-
-    assert!(permission::preflight(Need::Nothing, &report).is_ok());
+    assert!(permission::preflight(Need::Nothing, &denying(true, true)).is_ok());
 }
 
 #[test]
 fn a_screen_recording_need_ignores_a_denied_accessibility_permission() {
-    let mut report = PermissionReport::default();
-    report.accessibility = agent_desktop_core::PermissionState::Denied;
-
-    assert!(permission::preflight(Need::ScreenRecording, &report).is_ok());
+    assert!(permission::preflight(Need::ScreenRecording, &denying(true, false)).is_ok());
 }
 
 #[test]

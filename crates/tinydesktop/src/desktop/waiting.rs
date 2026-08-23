@@ -70,7 +70,7 @@ impl Desktop {
 /// mapping lives here. An unrecognized name is rejected by name instead of
 /// being dropped, which would otherwise turn a typo into a wait with no mode
 /// selected and a confusing "choose a mode" error.
-fn surface_wait(surface: Option<&str>) -> Result<Option<SurfaceWait>, AppError> {
+pub(super) fn surface_wait(surface: Option<&str>) -> Result<Option<SurfaceWait>, AppError> {
     match surface {
         None => Ok(None),
         Some("menu") => Ok(Some(SurfaceWait::Menu)),
