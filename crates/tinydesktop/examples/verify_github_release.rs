@@ -12,7 +12,7 @@
 use std::io;
 use std::time::Duration;
 
-use tinydesktop::{GreetRequest, GreetResponse, names};
+use tinydesktop::{DesktopResponse, names};
 use tinybus::Connection;
 use tinybus::broker::Broker;
 use tinybus::module::ModuleHost;
@@ -54,13 +54,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     .await??;
 
     let proxy = client.proxy(names::INTERFACE, names::OBJECT_PATH, names::INTERFACE)?;
-    let reply: GreetResponse = proxy
-        .call(names::methods::GREET, (GreetRequest::new("TinyBus"),))
-        .await?;
-    if reply.greeting != "Hello, TinyBus!" {
+    // `Version` needs no permission and touches no other application, so the
+    // check does not depend on how the machine running it is configured.
+    let reply: DesktopResponse = proxy.call(names::methods::VERSION, ()).await?;
+    if !reply.ok {
         return Err(io::Error::other(format!(
-            "module returned an unexpected greeting: {}",
-            reply.greeting
+            "module reported a failure for `{}`: {:?}",
+            names::methods::VERSION,
+            reply.error
         ))
         .into());
     }
