@@ -4,6 +4,8 @@
 //! the engine's own, so a divergence shows up here rather than as an
 //! `INVALID_ARGS` reply a host cannot explain.
 
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
 use super::{
     ClipboardFormat, Direction, ElementProperty, ElementStateProperty, Modifier, MouseButton,
     StatePredicate, Surface,

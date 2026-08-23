@@ -1,5 +1,7 @@
 //! Unit tests for the crate-wide error type.
 
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
 use super::Error;
 
 #[test]

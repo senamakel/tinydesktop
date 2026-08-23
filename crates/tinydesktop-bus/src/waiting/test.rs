@@ -1,5 +1,7 @@
 //! Unit tests pinning the wait payload's wire form.
 
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
 use super::WaitRequest;
 use serde_json::json;
 

@@ -4,6 +4,8 @@
 //! field names are the contract. These tests fail if a rename would silently
 //! turn a structured error into an absent one.
 
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
 use super::{
     Delivery, DeliveryDisposition, DesktopError, DesktopResponse, ENVELOPE_VERSION, RecoveryHint,
     RetryDisposition,

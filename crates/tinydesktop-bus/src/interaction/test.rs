@@ -1,5 +1,7 @@
 //! Unit tests pinning the ref-action payloads' wire forms.
 
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
 use super::{RefRequest, ScrollRequest, SelectRequest, SetValueRequest, TypeRequest};
 use crate::vocabulary::Direction;
 use serde_json::json;

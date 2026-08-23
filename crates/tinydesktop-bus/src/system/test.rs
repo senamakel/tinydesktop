@@ -1,5 +1,7 @@
 //! Unit tests pinning the permissions payload's wire form.
 
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
 use super::PermissionsRequest;
 use serde_json::json;
 

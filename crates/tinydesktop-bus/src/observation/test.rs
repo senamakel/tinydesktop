@@ -1,5 +1,7 @@
 //! Unit tests pinning the observation payloads' wire forms.
 
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
 use super::{FindRequest, GetRequest, IsRequest, ScreenshotRequest, SnapshotRequest};
 use crate::vocabulary::{ElementProperty, ElementStateProperty, StatePredicate, Surface};
 use serde_json::json;

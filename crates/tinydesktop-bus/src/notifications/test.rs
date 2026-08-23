@@ -1,5 +1,7 @@
 //! Unit tests pinning the notification payloads' wire forms.
 
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
 use super::{
     DismissAllNotificationsRequest, DismissNotificationRequest, ListNotificationsRequest,
     NotificationActionRequest,

@@ -1,5 +1,7 @@
 //! Unit tests pinning the application and window payloads' wire forms.
 
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
 use super::{
     CloseAppRequest, FocusWindowRequest, LaunchRequest, ListAppsRequest, ListSurfacesRequest,
     ListWindowsRequest, MoveWindowRequest, ResizeWindowRequest, WindowRequest,

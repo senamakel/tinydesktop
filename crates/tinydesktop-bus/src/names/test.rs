@@ -1,5 +1,7 @@
 //! Unit tests for the module's bus identity and its member list.
 
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
 use super::{INTERFACE, METHODS, OBJECT_PATH, methods};
 use std::collections::BTreeSet;
 

@@ -1,5 +1,7 @@
 //! Unit tests pinning the synthesized-input payloads' wire forms.
 
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
 use super::{
     DragEndpoint, DragRequest, HoldKeyRequest, HoldMouseRequest, HoverRequest, MouseClickRequest,
     MouseMoveRequest, MouseWheelRequest, PressRequest,

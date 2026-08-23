@@ -1,5 +1,7 @@
 //! Unit tests pinning the pasteboard payloads' wire forms.
 
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
 use super::{ClipboardGetRequest, ClipboardSetRequest};
 use crate::vocabulary::ClipboardFormat;
 use serde_json::json;

@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 /// the engine then fails with a structured error naming the running pid rather
 /// than quietly attaching to something the caller did not start.
 ///
-/// `cdp_port` opens a Chrome DevTools Protocol port on a Chromium-based
+/// `cdp_port` opens a Chrome `DevTools` Protocol port on a Chromium-based
 /// application and verifies it before returning. That is the seam for driving
 /// web contents with a browser automation library while native menus, dialogs,
 /// and windows stay on the accessibility path. `0` asks the engine to resolve a
@@ -37,7 +37,7 @@ pub struct LaunchRequest {
     /// document-based application creates its first window in response to
     /// activation, so a caller that needs a window has to ask for one.
     pub activate: bool,
-    /// The DevTools protocol port to open, or `0` to let the engine pick.
+    /// The `DevTools` protocol port to open, or `0` to let the engine pick.
     pub cdp_port: Option<u16>,
 }
 
