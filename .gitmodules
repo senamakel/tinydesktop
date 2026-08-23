@@ -2,3 +2,6 @@
 	path = vendor/tinybus
 	url = https://github.com/tinyhumansai/tinybus
 	branch = main
+[submodule "vendor/agent-desktop"]
+	path = vendor/agent-desktop
+	url = https://github.com/lahfir/agent-desktop
