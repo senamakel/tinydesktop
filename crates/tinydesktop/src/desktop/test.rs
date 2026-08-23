@@ -190,7 +190,7 @@ fn a_command_that_fails_still_names_itself_in_the_envelope() {
 
     assert_eq!(reply.command, "get");
     assert_eq!(reply.version, bus::ENVELOPE_VERSION);
-    assert!(reply.ok == reply.error.is_none());
+    assert_eq!(reply.ok, reply.error.is_none());
 }
 
 #[test]
