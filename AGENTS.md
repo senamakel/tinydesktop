@@ -238,8 +238,8 @@ and minimal features unless a new module capability requires more.
 - Payload types pin their serde representation in a unit test. That
   representation is the wire form: a host and a module that disagree about a
   field name fail at runtime with a decode error.
-- Use descriptive, behavioral test names: `rejects_an_empty_name`, not
-  `test_greet_2`.
+- Use descriptive, behavioral test names: `rejects_a_stale_ref`, not
+  `test_click_2`.
 - Every test must pass on a machine with no display server, no granted
   permission, and nothing running — CI is such a machine. Assert on the shape of
   a reply, not on a successful outcome that depends on how the box is set up.
