@@ -715,3 +715,97 @@ fn a_screenshot_of_a_named_application_needs_more_than_a_full_screen_one() {
     assert_eq!(full_screen.command, "screenshot");
     assert_eq!(targeted.command, "screenshot");
 }
+
+#[test]
+fn a_denied_screen_recording_permission_is_reported_before_the_capture_runs() {
+    let error = permission::preflight(Need::ScreenRecording, &denying(false, true))
+        .expect_err("a denied permission must not be ignored");
+    let payload = reply::envelope("screenshot", Err(error))
+        .error
+        .expect("a failed envelope carries an error");
+
+    assert_eq!(payload.code, ErrorCode::PermDenied.as_str());
+    assert!(
+        payload.suggestion.is_some(),
+        "a permission refusal must say where to grant it"
+    );
+}
+
+#[test]
+fn a_capture_of_a_named_window_is_refused_by_either_missing_permission() {
+    // The combined need means the accessibility half alone is enough to refuse,
+    // because the window cannot be resolved without it.
+    for report in [denying(true, false), denying(false, true)] {
+        assert!(
+            permission::preflight(Need::AccessibilityAndScreenRecording, &report).is_err(),
+            "a targeted capture needs both"
+        );
+    }
+    assert!(
+        permission::preflight(
+            Need::AccessibilityAndScreenRecording,
+            &PermissionReport::default()
+        )
+        .is_err(),
+        "an unknown permission is not a granted one"
+    );
+}
+
+#[test]
+fn every_delivery_disposition_survives_the_envelope_with_its_retry_verdict() {
+    for (semantics, expected_delivery, expected_retry) in [
+        (
+            DeliverySemantics::unknown(),
+            bus::DeliveryDisposition::Unknown,
+            bus::RetryDisposition::Unknown,
+        ),
+        (
+            DeliverySemantics::not_delivered(),
+            bus::DeliveryDisposition::NotDelivered,
+            bus::RetryDisposition::Safe,
+        ),
+        (
+            DeliverySemantics::uncertain(),
+            bus::DeliveryDisposition::DeliveryUncertain,
+            bus::RetryDisposition::Unsafe,
+        ),
+        (
+            DeliverySemantics::delivered_unverified(),
+            bus::DeliveryDisposition::DeliveredUnverified,
+            bus::RetryDisposition::Unsafe,
+        ),
+        (
+            DeliverySemantics::delivered_verified(),
+            bus::DeliveryDisposition::DeliveredVerified,
+            bus::RetryDisposition::Unsafe,
+        ),
+    ] {
+        let error = AppError::Adapter(
+            AdapterError::new(ErrorCode::ActionFailed, "the action did not take")
+                .with_disposition(semantics),
+        );
+        let payload = reply::envelope("click", Err(error))
+            .error
+            .expect("a failed envelope carries an error");
+
+        assert_eq!(payload.disposition.delivery, expected_delivery);
+        assert_eq!(payload.disposition.retry, expected_retry);
+        // The pair the engine reports and the pair the contract derives are the
+        // same pair; a caller may trust either field.
+        assert_eq!(payload.disposition, bus::Delivery::of(expected_delivery));
+    }
+}
+
+#[test]
+fn a_non_adapter_error_still_reaches_the_envelope_with_a_code() {
+    // An `AppError` that is not an adapter error carries no platform detail and
+    // no disposition, so this is the branch that must not assume one.
+    let payload = reply::envelope("find", Err(AppError::invalid_input("no mode selected")))
+        .error
+        .expect("a failed envelope carries an error");
+
+    assert_eq!(payload.code, ErrorCode::InvalidArgs.as_str());
+    assert!(payload.platform_detail.is_none());
+    assert!(payload.details.is_none());
+    assert_eq!(payload.disposition, bus::Delivery::default());
+}
