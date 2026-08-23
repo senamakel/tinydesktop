@@ -20,17 +20,27 @@ exclude = ["vendor", "worktrees"]
 [workspace.package]
 version = "0.2.1"
 edition = "2024"
-rust-version = "1.88"
+rust-version = "1.89"
 license = "GPL-3.0-only"
-repository = "https://github.com/tinyhumansai/rust-template"
+repository = "https://github.com/tinyhumansai/tinydesktop"
 
 [workspace.dependencies]
-# The wire contract. `crates/template` depends on it and re-exports it, so a
+# The wire contract. `crates/tinydesktop` depends on it and re-exports it, so a
 # host that only makes calls takes this crate alone.
 # No `version` requirement on purpose: the workspace version moves on every
 # release, and a pinned requirement here would stop resolving the moment it did.
 # Nothing in this workspace is published, so the path is the whole address.
-template-bus = { path = "crates/template-bus" }
+tinydesktop-bus = { path = "crates/tinydesktop-bus" }
+# The desktop automation engine this module wraps: accessibility-tree
+# observation, ref allocation, and the command implementations behind every
+# member of the bus interface. Vendored as the `vendor/agent-desktop` submodule
+# and pinned by its gitlink, the same way TinyBus is. `core` is
+# platform-neutral; the three adapter crates below supply the per-platform
+# accessibility backend and are taken as target-specific dependencies.
+agent-desktop-core = { path = "vendor/agent-desktop/crates/core" }
+agent-desktop-macos = { path = "vendor/agent-desktop/crates/macos" }
+agent-desktop-windows = { path = "vendor/agent-desktop/crates/windows" }
+agent-desktop-linux = { path = "vendor/agent-desktop/crates/linux" }
 # TinyBus defines the message types, interface macro, and frozen module ABI
 # used by the generated integration. Socket and CLI features are unnecessary
 # here.
@@ -41,7 +51,7 @@ tinybus = { path = "vendor/tinybus/crates/tinybus", version = "0.1.0", default-f
 # The module-side SDK owns the isolated runtime and exports the ABI entrypoints
 # required by TinyBus's dynamic loader.
 tinybus-module = { path = "vendor/tinybus/crates/tinybus-module", version = "0.1.0" }
-# Derive macros for the crate-wide error type in `crates/template/src/error/`.
+# Derive macros for the crate-wide error type in `crates/tinydesktop/src/error/`.
 # Every dependency entry should carry a comment like this one saying why it is
 # here.
 thiserror = "2"
