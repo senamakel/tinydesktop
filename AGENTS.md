@@ -123,7 +123,7 @@ broad ones.
 
 Keep public exports centralized in each crate's `src/lib.rs` so downstream users
 have one predictable surface. Put shared error variants in
-`crates/template/src/error/mod.rs` and return the crate-wide `Result<T>` from
+`crates/tinydesktop/src/error/mod.rs` and return the crate-wide `Result<T>` from
 fallible public APIs.
 
 ## Build And Test
@@ -306,7 +306,7 @@ must not merge yet. A pull request should:
 - link the related issue;
 - include updated tests, docs, and examples in the same change.
 
-The template in `.github/PULL_REQUEST_TEMPLATE.md` encodes this checklist.
+The checklist in `.github/PULL_REQUEST_TEMPLATE.md` encodes this checklist.
 Address review feedback by fixing it, and reply on each thread describing what
 changed. Do not resolve a thread whose feedback you have not addressed or
 explicitly declined with a reason.
