@@ -1,4 +1,11 @@
 //! Shared enumerations and the one shared struct used across request payloads.
+//!
+//! None of these carry `#[non_exhaustive]`, and that is deliberate. The module
+//! crate converts each one into its `agent-desktop-core` counterpart with an
+//! exhaustive `match`, so a variant added here without a conversion fails that
+//! build. A `#[non_exhaustive]` enum would force a wildcard arm in its place,
+//! and the wildcard would swallow exactly the case worth catching. Adding a
+//! variant is a minor bump of [`crate::CONTRACT_VERSION`] either way.
 
 use serde::{Deserialize, Serialize};
 
@@ -15,7 +22,6 @@ use serde::{Deserialize, Serialize};
 /// and lists the supported surfaces in the error details.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-#[non_exhaustive]
 pub enum Surface {
     /// The tree rooted at an application window. The default.
     #[default]
@@ -60,7 +66,6 @@ pub enum Surface {
 
 /// A scroll or navigation direction.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[non_exhaustive]
 pub enum Direction {
     /// Towards the top of the content.
     Up,
@@ -74,7 +79,6 @@ pub enum Direction {
 
 /// A physical mouse button.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[non_exhaustive]
 pub enum MouseButton {
     /// The primary button. The default.
     #[default]
@@ -90,7 +94,6 @@ pub enum MouseButton {
 /// `Cmd` deserializes to [`Modifier::Meta`], matching the engine's alias, so a
 /// caller may spell the macOS name and reach the same variant.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[non_exhaustive]
 pub enum Modifier {
     /// Command on macOS, Windows key elsewhere.
     #[serde(alias = "Cmd")]
@@ -106,7 +109,6 @@ pub enum Modifier {
 /// The pasteboard flavor a clipboard read asks for.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-#[non_exhaustive]
 pub enum ClipboardFormat {
     /// Whichever flavor the pasteboard currently holds.
     Auto,
@@ -125,7 +127,6 @@ pub enum ClipboardFormat {
 /// alongside its value so a reply is self-describing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-#[non_exhaustive]
 pub enum ElementProperty {
     /// The element's text content, read live where the platform allows it.
     Text,
@@ -149,7 +150,6 @@ pub enum ElementProperty {
 /// that can be checked".
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-#[non_exhaustive]
 pub enum ElementStateProperty {
     /// Whether the element is on screen and not hidden.
     Visible,
