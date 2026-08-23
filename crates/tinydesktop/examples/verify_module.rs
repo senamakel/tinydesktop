@@ -1,14 +1,19 @@
 //! Loads a built module through the real `TinyBus` dynamic loader.
+//!
+//! The unit tests serve the interface in-process; this proves the compiled
+//! `cdylib` exports the ABI, announces its manifest, claims its name, and
+//! answers a call. A release archive is not accepted until this passes against
+//! the artifact that would ship.
 
 use std::io;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use template::{GreetRequest, GreetResponse, names};
 use tinybus::Connection;
 use tinybus::broker::Broker;
 use tinybus::module::ModuleHost;
 use tinybus::transport::memory::MemoryBus;
+use tinydesktop::{DesktopResponse, METHODS, names};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -41,34 +46,34 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     .await??;
 
     let proxy = client.proxy(names::INTERFACE, names::OBJECT_PATH, names::INTERFACE)?;
-    let reply: GreetResponse = proxy
-        .call(names::methods::GREET, (GreetRequest::new("TinyBus"),))
-        .await?;
-    if reply.greeting != "Hello, TinyBus!" {
+
+    // `Version` needs no permission and touches no other application, so it
+    // proves the module answers without making the check depend on how the
+    // build machine is configured.
+    let reply: DesktopResponse = proxy.call(names::methods::VERSION, ()).await?;
+    if !reply.ok {
         return Err(io::Error::other(format!(
-            "module returned an unexpected greeting: {}",
-            reply.greeting
+            "module reported a failure for `{}`: {:?}",
+            names::methods::VERSION,
+            reply.error
         ))
         .into());
     }
 
     println!(
-        "verified {} as TinyBus module `{}`",
+        "verified {} as TinyBus module `{}`, serving {} members",
         module.display(),
-        info.name
+        info.name,
+        METHODS.len()
     );
     broker_task.abort();
     Ok(())
 }
 
+/// The path to the module under test, from the first argument.
 fn module_argument() -> Result<PathBuf, io::Error> {
     std::env::args_os()
         .nth(1)
         .map(PathBuf::from)
-        .ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "usage: cargo run --example verify_module -- <module-path>",
-            )
-        })
+        .ok_or_else(|| io::Error::other("usage: verify_module <path-to-module>"))
 }

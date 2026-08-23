@@ -4,15 +4,15 @@
 //!
 //! ```text
 //! cargo run --example verify_github_release -- \
-//!   https://github.com/tinyhumansai/template/releases/tag/v0.1.4 \
-//!   template-0.1.4-ubuntu-24.04-x86_64.tar.gz \
+//!   https://github.com/tinyhumansai/tinydesktop/releases/tag/v0.1.4 \
+//!   tinydesktop-0.1.4-ubuntu-24.04-x86_64.tar.gz \
 //!   <sha256>
 //! ```
 
 use std::io;
 use std::time::Duration;
 
-use template::{GreetRequest, GreetResponse, names};
+use tinydesktop::{GreetRequest, GreetResponse, names};
 use tinybus::Connection;
 use tinybus::broker::Broker;
 use tinybus::module::ModuleHost;
