@@ -72,7 +72,7 @@ jobs:
         run: |
           set -euo pipefail
           forbidden="$(cargo tree -p tinydesktop-bus -e normal,build --prefix none \
-            | grep -Ei 'tinybus|tokio|reqwest|ureq|hyper|rusqlite|git2' || true)"
+            | grep -Ei 'tinybus|tokio|reqwest|ureq|hyper|rusqlite|git2|agent-desktop' || true)"
           if [ -n "$forbidden" ]; then
             echo "tinydesktop-bus pulled in a dependency its manifest forbids:" >&2
             echo "$forbidden" >&2
