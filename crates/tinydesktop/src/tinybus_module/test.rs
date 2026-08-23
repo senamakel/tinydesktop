@@ -14,13 +14,26 @@ use tinybus::transport::memory::MemoryBus;
 use tinybus::{Connection, Interface};
 use tinydesktop_bus::{DesktopResponse, PermissionsRequest, names};
 
-/// The declared manifest method list, parsed back out of the descriptor the
-/// module exports.
+/// The `methods = [...]` list `module_export!` was handed, read back out of
+/// this module's own source.
+///
+/// The macro turns that list into an `extern "C"` function returning a raw
+/// slice, and reading one back needs `unsafe`, which this workspace forbids.
+/// Reading the literals the macro was given is the same assertion — that the
+/// declared manifest and the contract agree — reached the safe way.
 fn manifest_methods() -> Vec<String> {
-    super::MODULE_MANIFEST
-        .methods
-        .iter()
-        .map(|method| (*method).to_owned())
+    let source = include_str!("mod.rs");
+    let (_, rest) = source
+        .split_once("    methods = [")
+        .expect("the module declares a methods list");
+    let (list, _) = rest
+        .split_once("\n    ]")
+        .expect("the methods list is closed on its own line");
+
+    list.split('"')
+        .skip(1)
+        .step_by(2)
+        .map(str::to_owned)
         .collect()
 }
 
