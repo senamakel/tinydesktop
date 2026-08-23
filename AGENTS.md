@@ -4,66 +4,58 @@ This file is the single source of truth for how humans and coding agents work
 in this repository. `CLAUDE.md` is a symlink to this file, so every agent reads
 the same instructions.
 
-When you generate a new project from this template, keep this file and adapt
-the project-specific parts (crate name, module map, feature flags, commands).
-Delete guidance that no longer applies rather than leaving it to rot.
+## What This Repository Is
 
-## Template Checklist
+tinydesktop adapts the vendored [`agent-desktop`] engine — accessibility-tree
+observation and interaction for macOS, Windows, and Linux — into an installable
+TinyBus module, so a host can expose desktop automation to an agent as typed
+tool calls.
 
-Do this once, in a single commit, before writing feature code:
+[`agent-desktop`]: https://github.com/lahfir/agent-desktop
 
-- [ ] Rename `crates/template` and `crates/template-bus` to the project's crate
-      names, and update `name` in each manifest plus the `template-bus` entry in
-      the root `[workspace.dependencies]`.
-- [ ] Set `description`, `keywords`, and `categories` in each manifest, and
-      `repository` in the root `[workspace.package]`.
-- [ ] Rename the crate references in `README.md`, both `src/lib.rs` files,
-      `crates/template/examples/`, and `crates/template/tests/` (search for
-      `template` and `template_bus`).
-- [ ] Replace the placeholder `greeting` module in both crates with the first
-      real feature area — payload types in the contract crate, behavior in the
-      module crate — keeping the `mod.rs` / `types.rs` / `test.rs` layout.
-- [ ] Confirm `license` and `LICENSE` match the project's intended license.
-- [ ] Update the security contact in `SECURITY.md`.
-- [ ] Rename the TinyBus interface, object path, and member constants in
-      `crates/template-bus/src/names/`, and the matching `provides` / `methods`
-      declarations in `crates/template/src/tinybus_module/`, while keeping
-      `vendor/tinybus` pinned.
-- [ ] Reset `CONTRACT_VERSION` in `crates/template-bus/src/version/` for the new
-      contract.
-- [ ] Replace `ROADMAP.md` with the real plan, or delete it.
-- [ ] Rewrite the "Project Structure" section below to describe this workspace.
+The single most important thing to understand before changing anything here:
+**this repository is an adapter, not an engine.** Behavior lives upstream. If a
+snapshot returns the wrong tree or a click reaches the wrong element, that is a
+bug in `vendor/agent-desktop`, and it is fixed there and picked up as a gitlink
+bump. What belongs here is the contract, the conversion, the permission
+preflight, and the bus surface.
 
 ## Project Structure
 
 This is a Rust 2024 cargo workspace rooted at a virtual `Cargo.toml`. Every
 crate lives under `crates/`, one directory per package, each directory named for
 the package it holds. There is no root package: the crate that ships as the
-loadable module is `crates/template`, the same as any other member.
+loadable module is `crates/tinydesktop`, the same as any other member.
 
 ```text
 Cargo.toml              # virtual workspace: members, [workspace.package],
                         # [workspace.dependencies], [workspace.lints]
 crates/
-├── template-bus/       # the wire contract: what crosses the bus, nothing else
+├── tinydesktop-bus/    # the wire contract: what crosses the bus, nothing else
 │   ├── README.md       # why the contract is its own crate
 │   └── src/
 │       ├── lib.rs      # crate docs + the entire public re-export surface
 │       ├── names/      # interface, object path, one constant per member
+│       ├── envelope/   # DesktopResponse and DesktopError
+│       ├── vocabulary/ # enumerations shared across payload families
 │       ├── version/    # contract version and the host bind rule
 │       └── <family>/   # one directory per payload family
-└── template/           # the module: behavior, adapter, and the cdylib
+└── tinydesktop/        # the module: engine wrapper, adapter, and the cdylib
     ├── src/
     │   ├── lib.rs      # crate docs + public surface, re-exporting the contract
     │   ├── error/mod.rs      # crate-wide `Error` and `Result<T>`
-    │   ├── tinybus_module/   # TinyBus interface, ABI exports, integration tests
-    │   └── <feature>/        # one directory per feature area
-    │       ├── mod.rs        # module docs, wiring, smallest useful public API
-    │       ├── types.rs      # substantial type definitions
-    │       └── test.rs       # module-local unit tests
+    │   ├── desktop/          # the engine: one method per member, by family
+    │   │   ├── mod.rs        # `Desktop`, its configuration, and the run path
+    │   │   ├── convert.rs    # contract payloads -> engine arguments
+    │   │   ├── permission.rs # what each member needs, and the preflight
+    │   │   ├── reply.rs      # engine result -> response envelope
+    │   │   └── test.rs       # module-local unit tests
+    │   └── tinybus_module/   # TinyBus interface, ABI exports, integration tests
     ├── tests/          # integration tests against the public API only
     └── examples/       # runnable, compiled-in-CI usage examples
-vendor/tinybus/         # pinned TinyBus host types and module SDK
+vendor/
+├── tinybus/            # pinned TinyBus host types and module SDK
+└── agent-desktop/      # pinned desktop automation engine
 docs/
 ├── specs/              # behavior and architecture specifications
 ├── plans/              # test-first implementation plans
@@ -72,19 +64,36 @@ docs/
 
 ### The two-crate split
 
-`crates/template-bus` holds every type that crosses the bus and the names of the
-members that carry them. It has no transport, no runtime, and no behavior, and
-CI asserts it stays that way. A host that only makes calls depends on it alone.
+`crates/tinydesktop-bus` holds every type that crosses the bus and the names of
+the members that carry them. It has no transport, no runtime, no engine, and no
+behavior, and CI asserts it stays that way. A host that only makes calls depends
+on it alone.
 
-`crates/template` depends on it and re-exports all of it, so
-`template::GreetRequest` and `template_bus::GreetRequest` are the *same* type
-rather than structural twins. That direction is load-bearing: a parallel set of
-payload types for hosts would mean a conversion at every call site that nothing
-checks.
+`crates/tinydesktop` depends on it and re-exports all of it, so
+`tinydesktop::SnapshotRequest` and `tinydesktop_bus::SnapshotRequest` are the
+*same* type rather than structural twins. That direction is load-bearing: a
+parallel set of payload types for hosts would mean a conversion at every call
+site that nothing checks.
 
 The rule for deciding where something goes: a payload type describes what a
 frame carries and belongs in the contract; anything that answers a frame, holds
 a connection, or touches an engine belongs in the module crate.
+
+### Two rules specific to this adapter
+
+**The contract mirrors the engine's enumerations; it does not import them.**
+`Surface`, `Modifier`, `MouseButton`, and the rest are redefined in
+`crates/tinydesktop-bus/src/vocabulary/`, because a host must be able to name a
+surface without linking a platform accessibility backend. `desktop/convert.rs`
+maps between them with exhaustive `match`es, which is why those enumerations
+deliberately carry no `#[non_exhaustive]`: a variant added upstream must fail
+this build rather than fall into a wildcard arm.
+
+**Every member returns a `DesktopResponse`, never a `Result`.** A stale ref, a
+denied permission, and an ambiguous application name are results a caller acts
+on — they carry codes, suggestions, and recovery hints. `Error` is reserved for
+the module failing to start a command at all. Do not add a variant to `Error`
+for something the envelope can express.
 
 Add a crate by creating `crates/<name>/` — `members = ["crates/*"]` picks it up
 by existing. Inherit `version`, `edition`, `rust-version`, `license`, and
@@ -133,8 +142,10 @@ Supporting commands:
 
 - `cargo fmt --all` — format before committing.
 - `cargo test <filter>` — run a focused subset while iterating.
-- `cargo test -p template-bus` — run one crate's suite.
-- `cargo run -p template --example basic` — run the bundled example.
+- `cargo test -p tinydesktop-bus` — run one crate's suite.
+- `cargo run -p tinydesktop --example basic` — run the bundled example.
+- `cargo run -p tinydesktop --example verify_module -- <path>` — load a built
+  `cdylib` through the real TinyBus dynamic loader.
 - `cargo doc --no-deps --all-features` — build the rustdoc CI also builds with
   `RUSTDOCFLAGS="-D warnings"`.
 - `cargo test --doc` — run doctests alone when editing documentation examples.
@@ -185,8 +196,9 @@ add one:
 - gate anything optional behind a Cargo feature, documented in `Cargo.toml`;
 - declare it once in the root `[workspace.dependencies]` when more than one
   crate needs it, and take it with `{ workspace = true }`;
-- never add one to `crates/template-bus` that pulls in a transport, an async
-  runtime, an HTTP client, or a native library — CI fails the build if you do;
+- never add one to `crates/tinydesktop-bus` that pulls in a transport, an async
+  runtime, an HTTP client, a native library, or the engine itself — CI fails the
+  build if you do;
 - leave a comment above the entry explaining *why* the crate is needed and what
   uses it — see the existing entries for the expected tone;
 - prefer well-maintained crates with a compatible license.
@@ -196,18 +208,26 @@ releases are reproducible.
 
 ### Vendored dependencies
 
-TinyBus is registered as the `vendor/tinybus` git submodule and pinned by its
-gitlink. It supplies the host types and module-side SDK required to build this
-crate's `cdylib`. Initialize it after cloning with:
+Two submodules, both pinned by gitlink:
+
+- `vendor/tinybus` supplies the host types and module-side SDK required to build
+  the `cdylib`.
+- `vendor/agent-desktop` supplies the automation engine: `agent-desktop-core`
+  plus one accessibility backend per platform, taken as target-specific
+  dependencies.
+
+Initialize both after cloning with:
 
 ```sh
 git submodule update --init --recursive
 ```
 
-Do not edit vendored code from the parent repository. Make TinyBus changes in
-its own repository, push them there, then update this repository's gitlink in a
-separate commit. Keep the exact path dependencies and minimal features unless a
-new module capability requires more.
+Do not edit vendored code from the parent repository. Make a change in its own
+repository, push it there, then update this repository's gitlink in a separate
+commit. That applies especially to `agent-desktop`: a wrong tree, a wrong click,
+or a missing platform surface is an upstream bug, and patching it here would
+strand the fix the moment the gitlink moves. Keep the exact path dependencies
+and minimal features unless a new module capability requires more.
 
 ## Testing
 
@@ -220,6 +240,9 @@ new module capability requires more.
   field name fail at runtime with a decode error.
 - Use descriptive, behavioral test names: `rejects_an_empty_name`, not
   `test_greet_2`.
+- Every test must pass on a machine with no display server, no granted
+  permission, and nothing running — CI is such a machine. Assert on the shape of
+  a reply, not on a successful outcome that depends on how the box is set up.
 - Cover the failure paths, not just the happy path. Every new error variant
   needs a test that produces it.
 - For async behavior, standardize on one runtime (`tokio` as a dev-dependency
@@ -295,7 +318,7 @@ Releases run from `.github/workflows/release.yml` via a manual
 an interrupted release after its version commit and tag exist. The workflow
 re-runs the full validation suite, computes the next version, updates
 the root `[workspace.package]` version and `Cargo.lock`, commits and tags
-`vX.Y.Z`, builds `crates/template` as a TinyBus module for every supported
+`vX.Y.Z`, builds `crates/tinydesktop` as a TinyBus module for every supported
 platform, pushes, and creates an immutable GitHub release with installable
 native packages.
 
