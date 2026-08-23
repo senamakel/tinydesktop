@@ -741,13 +741,16 @@ fn a_capture_of_a_named_window_is_refused_by_either_missing_permission() {
             "a targeted capture needs both"
         );
     }
+    // An *unknown* permission is not a denied one: a platform that cannot say
+    // must not block the command, or Linux — where nothing is reportable —
+    // would refuse everything before the engine got the chance to explain what
+    // it does not support.
     assert!(
         permission::preflight(
             Need::AccessibilityAndScreenRecording,
             &PermissionReport::default()
         )
-        .is_err(),
-        "an unknown permission is not a granted one"
+        .is_ok()
     );
 }
 
