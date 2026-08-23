@@ -797,9 +797,10 @@ fn every_delivery_disposition_survives_the_envelope_with_its_retry_verdict() {
 }
 
 #[test]
-fn a_non_adapter_error_still_reaches_the_envelope_with_a_code() {
-    // An `AppError` that is not an adapter error carries no platform detail and
-    // no disposition, so this is the branch that must not assume one.
+fn a_rejected_argument_is_reported_as_never_having_been_delivered() {
+    // An argument the engine refuses never reached the application, so a retry
+    // with a corrected argument cannot duplicate an effect. The envelope has to
+    // carry that, or a caller has to guess.
     let payload = reply::envelope("find", Err(AppError::invalid_input("no mode selected")))
         .error
         .expect("a failed envelope carries an error");
@@ -807,5 +808,20 @@ fn a_non_adapter_error_still_reaches_the_envelope_with_a_code() {
     assert_eq!(payload.code, ErrorCode::InvalidArgs.as_str());
     assert!(payload.platform_detail.is_none());
     assert!(payload.details.is_none());
+    assert_eq!(payload.disposition.retry, bus::RetryDisposition::Safe);
+}
+
+#[test]
+fn an_error_the_engine_cannot_classify_becomes_an_internal_one() {
+    // `Internal` carries no code of its own, so this is the branch of the
+    // mapping that must not assume an adapter error.
+    let payload = reply::envelope("status", Err(AppError::Internal("boom".to_owned())))
+        .error
+        .expect("a failed envelope carries an error");
+
+    assert_eq!(payload.code, ErrorCode::Internal.as_str());
+    assert_eq!(payload.message, "boom");
+    assert!(payload.suggestion.is_none());
+    assert!(payload.recovery.is_none());
     assert_eq!(payload.disposition, bus::Delivery::default());
 }
