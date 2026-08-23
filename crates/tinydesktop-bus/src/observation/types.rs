@@ -13,6 +13,11 @@ use crate::vocabulary::{ElementProperty, ElementStateProperty, StatePredicate, S
 /// returns structure without leaf detail, which is enough to decide where to
 /// look before spending a full walk on that subtree. Follow it with a second
 /// snapshot carrying `root_ref` set to the interesting container.
+// The engine's own snapshot and find arguments are flag-shaped, and this is
+// the wire form a caller writes by hand or an agent emits as a tool call.
+// Folding the flags into enums would rename them on the wire for a tidiness
+// this file cannot afford: the names are the contract.
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct SnapshotRequest {
@@ -50,6 +55,7 @@ pub struct SnapshotRequest {
 /// The selection fields are mutually exclusive — supplying more than one of
 /// `count`, `first`, `last`, and `nth` is an `INVALID_ARGS` error rather than
 /// a silent precedence rule.
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct FindRequest {
