@@ -1,4 +1,4 @@
-# template-bus
+# tinydesktop-bus
 
 Every type that crosses the template module's `TinyBus` boundary, and the names
 of the members that carry them.
@@ -32,11 +32,11 @@ The alternative, a parallel set of payload types for hosts, is worse: a
 call site that nothing checks. One definition, here, at the bottom.
 
 Because the re-export is by module as well as by item, `template::GreetRequest`,
-`template::names::OBJECT_PATH`, and `template_bus::greeting::GreetRequest` all
+`template::names::OBJECT_PATH`, and `tinydesktop_bus::greeting::GreetRequest` all
 resolve to the same items, not twins.
 
 So: a module author depends on `template` and gets behavior and vocabulary. A
-host depends on `template-bus` and gets vocabulary alone.
+host depends on `tinydesktop-bus` and gets vocabulary alone.
 
 ## What is deliberately absent
 
@@ -60,7 +60,7 @@ Arguments travel as a positional JSON array — `#[tinybus::interface]` decodes
 them into a tuple — and the member name comes from `names`:
 
 ```rust,ignore
-use template_bus::{names, GreetRequest, GreetResponse};
+use tinydesktop_bus::{names, GreetRequest, GreetResponse};
 
 let proxy = connection.proxy(names::INTERFACE, names::OBJECT_PATH, names::INTERFACE)?;
 let reply: GreetResponse = proxy

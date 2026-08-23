@@ -1,6 +1,13 @@
-//! Unit tests for the bus name table.
+//! Unit tests for the module's bus identity and its member list.
 
 use super::{INTERFACE, METHODS, OBJECT_PATH, methods};
+use std::collections::BTreeSet;
+
+#[test]
+fn the_interface_and_object_path_are_pinned() {
+    assert_eq!(INTERFACE, "ai.tinyhumans.tinydesktop.Desktop");
+    assert_eq!(OBJECT_PATH, "/ai/tinyhumans/tinydesktop/Desktop");
+}
 
 #[test]
 fn the_object_path_is_the_interface_in_path_form() {
@@ -9,20 +16,52 @@ fn the_object_path_is_the_interface_in_path_form() {
 }
 
 #[test]
-fn every_member_is_listed_exactly_once() {
-    let mut sorted = METHODS.to_vec();
-    sorted.sort_unstable();
-    let mut deduplicated = sorted.clone();
-    deduplicated.dedup();
-    assert_eq!(sorted, deduplicated);
+fn every_member_name_is_listed_exactly_once() {
+    let unique = METHODS.iter().collect::<BTreeSet<_>>();
+    assert_eq!(unique.len(), METHODS.len());
 }
 
 #[test]
-fn the_method_table_holds_the_declared_members() {
-    assert_eq!(METHODS, [methods::GREET]);
+fn the_member_list_has_the_fifty_four_members_the_contract_documents() {
+    assert_eq!(METHODS.len(), 54);
 }
 
 #[test]
-fn no_member_name_is_empty() {
-    assert!(METHODS.iter().all(|method| !method.is_empty()));
+fn every_member_name_is_pascal_case_and_non_empty() {
+    for member in METHODS {
+        assert!(!member.is_empty(), "a member name must not be empty");
+        assert!(
+            member
+                .chars()
+                .next()
+                .is_some_and(|first| first.is_ascii_uppercase()),
+            "{member} must start with an uppercase letter"
+        );
+        assert!(
+            member.chars().all(|c| c.is_ascii_alphanumeric()),
+            "{member} must be alphanumeric so it needs no escaping on the wire"
+        );
+    }
+}
+
+#[test]
+fn the_families_appear_in_the_documented_order() {
+    // Observation first because it allocates the refs every other family
+    // spends. The list order is the dispatch order the module asserts against.
+    assert_eq!(METHODS.first(), Some(&methods::SNAPSHOT));
+    assert_eq!(METHODS.last(), Some(&methods::PERMISSIONS));
+}
+
+#[test]
+fn the_four_reserved_hold_members_are_served_rather_than_omitted() {
+    // They fail closed, but a structured, explained failure beats an
+    // `UnknownMethod` a caller cannot interpret.
+    for reserved in [
+        methods::KEY_DOWN,
+        methods::KEY_UP,
+        methods::MOUSE_DOWN,
+        methods::MOUSE_UP,
+    ] {
+        assert!(METHODS.contains(&reserved), "{reserved} must be served");
+    }
 }
