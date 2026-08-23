@@ -10,15 +10,12 @@
 use agent_desktop_core::{AppError, DeliverySemantics, RetryDisposition, output::ErrorPayload};
 use serde_json::Value;
 use tinydesktop_bus::{
-    Delivery, DeliveryDisposition, DesktopError, DesktopResponse, RecoveryHint, RetryDisposition as
-        ContractRetry,
+    Delivery, DeliveryDisposition, DesktopError, DesktopResponse, RecoveryHint,
+    RetryDisposition as ContractRetry,
 };
 
 /// Wraps `result` in the envelope, naming it `command`.
-pub(super) fn envelope(
-    command: &str,
-    result: Result<Value, AppError>,
-) -> DesktopResponse {
+pub(super) fn envelope(command: &str, result: Result<Value, AppError>) -> DesktopResponse {
     match result {
         Ok(data) => DesktopResponse::ok(command, data),
         Err(error) => DesktopResponse::err(command, desktop_error(&error)),
@@ -64,5 +61,8 @@ fn delivery(semantics: DeliverySemantics) -> Delivery {
         RetryDisposition::Unsafe => ContractRetry::Unsafe,
     };
 
-    Delivery { delivery: disposition, retry }
+    Delivery {
+        delivery: disposition,
+        retry,
+    }
 }

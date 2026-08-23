@@ -13,7 +13,7 @@ use std::path::Path;
 use serde_json::json;
 use tinydesktop_bus as bus;
 
-use super::{Desktop, convert, permission::Need, permission, reply};
+use super::{Desktop, convert, permission, permission::Need, reply};
 use agent_desktop_core::{
     AdapterError, AppError, DeliverySemantics, ErrorCode, PermissionReport, PermissionState,
 };
@@ -247,7 +247,9 @@ fn an_adapter_error_keeps_its_structured_detail_through_the_envelope() {
     assert_eq!(payload.details, Some(json!({ "ref": "@s1:e2" })));
     assert_eq!(payload.disposition.retry, bus::RetryDisposition::Safe);
     // A retry-safe stale ref is exactly the case that gets a recovery hint.
-    let recovery = payload.recovery.expect("a stale ref carries a recovery hint");
+    let recovery = payload
+        .recovery
+        .expect("a stale ref carries a recovery hint");
     assert!(recovery.requires_fresh_snapshot);
 }
 

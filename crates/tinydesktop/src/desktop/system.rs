@@ -45,17 +45,9 @@ impl Desktop {
         // The report is fetched but not preflighted: reporting a denied
         // permission is exactly what this member is for, so refusing to run
         // because one is denied would be circular.
-        self.run_with_report(
-            "status",
-            Need::Nothing,
-            |adapter, context, _report| {
-                status::execute_with_report_with_context(
-                    adapter,
-                    &live_report(adapter),
-                    context,
-                )
-            },
-        )
+        self.run_with_report("status", Need::Nothing, |adapter, context, _report| {
+            status::execute_with_report_with_context(adapter, &live_report(adapter), context)
+        })
     }
 
     /// Reports, and optionally prompts for, the permissions automation needs.

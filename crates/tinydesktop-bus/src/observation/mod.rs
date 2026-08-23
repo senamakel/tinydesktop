@@ -15,9 +15,7 @@
 
 mod types;
 
-pub use types::{
-    FindRequest, GetRequest, IsRequest, ScreenshotRequest, SnapshotRequest,
-};
+pub use types::{FindRequest, GetRequest, IsRequest, ScreenshotRequest, SnapshotRequest};
 
 #[cfg(test)]
 mod test;

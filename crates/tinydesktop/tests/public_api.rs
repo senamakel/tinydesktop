@@ -83,7 +83,12 @@ fn a_failed_reply_carries_a_machine_readable_code() {
 
     let error = reply.error.expect("an empty ref cannot succeed");
     assert!(!error.code.is_empty());
-    assert!(error.code.chars().all(|c| c.is_ascii_uppercase() || c == '_'));
+    assert!(
+        error
+            .code
+            .chars()
+            .all(|c| c.is_ascii_uppercase() || c == '_')
+    );
     assert!(!error.message.is_empty());
 }
 

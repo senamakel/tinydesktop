@@ -80,12 +80,18 @@ fn an_engine_reply_round_trips_through_the_envelope() {
     });
 
     let reply: DesktopResponse = serde_json::from_value(wire.clone()).expect("the reply decodes");
-    let error = reply.error.as_ref().expect("a failed reply carries an error");
+    let error = reply
+        .error
+        .as_ref()
+        .expect("a failed reply carries an error");
 
     assert!(!reply.ok);
     assert_eq!(error.code, "STALE_REF");
     assert_eq!(
-        error.recovery.as_ref().map(|hint| hint.requires_fresh_snapshot),
+        error
+            .recovery
+            .as_ref()
+            .map(|hint| hint.requires_fresh_snapshot),
         Some(true)
     );
     assert_eq!(error.disposition.retry, RetryDisposition::Safe);

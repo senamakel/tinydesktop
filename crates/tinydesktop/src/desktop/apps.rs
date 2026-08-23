@@ -1,11 +1,11 @@
 //! The members that manage applications, windows, and displays.
 
 use agent_desktop_core::{
-    launch_options::LaunchOptions,
     commands::{
         close_app, focus_window, launch, list_apps, list_displays, list_surfaces, list_windows,
         maximize, minimize, move_window, resize_window, restore,
     },
+    launch_options::LaunchOptions,
 };
 use tinydesktop_bus::{
     CloseAppRequest, DesktopResponse, FocusWindowRequest, LaunchRequest, ListAppsRequest,

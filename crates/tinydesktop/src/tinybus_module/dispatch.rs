@@ -18,10 +18,10 @@ use tinydesktop_bus::{
     DismissAllNotificationsRequest, DismissNotificationRequest, DragRequest, FindRequest,
     FocusWindowRequest, GetRequest, HoldKeyRequest, HoldMouseRequest, HoverRequest, IsRequest,
     LaunchRequest, ListAppsRequest, ListNotificationsRequest, ListSurfacesRequest,
-    ListWindowsRequest, MouseClickRequest, MouseMoveRequest, MouseWheelRequest,
-    MoveWindowRequest, NotificationActionRequest, PermissionsRequest, PressRequest, RefRequest,
-    ResizeWindowRequest, ScreenshotRequest, ScrollRequest, SelectRequest, SetValueRequest,
-    SnapshotRequest, TypeRequest, WaitRequest, WindowRequest,
+    ListWindowsRequest, MouseClickRequest, MouseMoveRequest, MouseWheelRequest, MoveWindowRequest,
+    NotificationActionRequest, PermissionsRequest, PressRequest, RefRequest, ResizeWindowRequest,
+    ScreenshotRequest, ScrollRequest, SelectRequest, SetValueRequest, SnapshotRequest, TypeRequest,
+    WaitRequest, WindowRequest,
 };
 
 use crate::{Desktop, Result};
@@ -250,7 +250,8 @@ impl DesktopService {
 
     /// Lists the surfaces an application currently exposes.
     async fn list_surfaces(&self, request: ListSurfacesRequest) -> TinyBusResult<DesktopResponse> {
-        self.run(move |desktop| desktop.list_surfaces(request)).await
+        self.run(move |desktop| desktop.list_surfaces(request))
+            .await
     }
 
     /// Brings a window forward.
@@ -260,7 +261,8 @@ impl DesktopService {
 
     /// Resizes a window.
     async fn resize_window(&self, request: ResizeWindowRequest) -> TinyBusResult<DesktopResponse> {
-        self.run(move |desktop| desktop.resize_window(request)).await
+        self.run(move |desktop| desktop.resize_window(request))
+            .await
     }
 
     /// Moves a window's origin.
@@ -285,12 +287,14 @@ impl DesktopService {
 
     /// Reads the pasteboard.
     async fn clipboard_get(&self, request: ClipboardGetRequest) -> TinyBusResult<DesktopResponse> {
-        self.run(move |desktop| desktop.clipboard_get(request)).await
+        self.run(move |desktop| desktop.clipboard_get(request))
+            .await
     }
 
     /// Writes the pasteboard.
     async fn clipboard_set(&self, request: ClipboardSetRequest) -> TinyBusResult<DesktopResponse> {
-        self.run(move |desktop| desktop.clipboard_set(request)).await
+        self.run(move |desktop| desktop.clipboard_set(request))
+            .await
     }
 
     /// Empties the pasteboard.
@@ -299,23 +303,39 @@ impl DesktopService {
     }
 
     /// Lists notification-centre entries.
-    async fn list_notifications(&self, request: ListNotificationsRequest) -> TinyBusResult<DesktopResponse> {
-        self.run(move |desktop| desktop.list_notifications(request)).await
+    async fn list_notifications(
+        &self,
+        request: ListNotificationsRequest,
+    ) -> TinyBusResult<DesktopResponse> {
+        self.run(move |desktop| desktop.list_notifications(request))
+            .await
     }
 
     /// Invokes an action on a notification.
-    async fn notification_action(&self, request: NotificationActionRequest) -> TinyBusResult<DesktopResponse> {
-        self.run(move |desktop| desktop.notification_action(request)).await
+    async fn notification_action(
+        &self,
+        request: NotificationActionRequest,
+    ) -> TinyBusResult<DesktopResponse> {
+        self.run(move |desktop| desktop.notification_action(request))
+            .await
     }
 
     /// Dismisses one notification.
-    async fn dismiss_notification(&self, request: DismissNotificationRequest) -> TinyBusResult<DesktopResponse> {
-        self.run(move |desktop| desktop.dismiss_notification(request)).await
+    async fn dismiss_notification(
+        &self,
+        request: DismissNotificationRequest,
+    ) -> TinyBusResult<DesktopResponse> {
+        self.run(move |desktop| desktop.dismiss_notification(request))
+            .await
     }
 
     /// Dismisses every notification, optionally scoped to one application.
-    async fn dismiss_all_notifications(&self, request: DismissAllNotificationsRequest) -> TinyBusResult<DesktopResponse> {
-        self.run(move |desktop| desktop.dismiss_all_notifications(request)).await
+    async fn dismiss_all_notifications(
+        &self,
+        request: DismissAllNotificationsRequest,
+    ) -> TinyBusResult<DesktopResponse> {
+        self.run(move |desktop| desktop.dismiss_all_notifications(request))
+            .await
     }
 
     /// Blocks until a condition holds or the timeout expires.

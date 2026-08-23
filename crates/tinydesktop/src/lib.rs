@@ -103,18 +103,17 @@ pub use error::{Error, Result};
 // publishes. A host may depend on `tinydesktop-bus` directly and get exactly
 // these types; nothing here redefines them.
 pub use tinydesktop_bus;
+pub use tinydesktop_bus::CloseAppRequest;
 pub use tinydesktop_bus::{
     CONTRACT_VERSION, ClipboardFormat, ClipboardGetRequest, ClipboardSetRequest, Delivery,
-    DeliveryDisposition, DesktopError, DesktopResponse, Direction,
-    DismissAllNotificationsRequest, DismissNotificationRequest, DragEndpoint, DragRequest,
-    ENVELOPE_VERSION, ElementProperty, ElementStateProperty, FindRequest, FocusWindowRequest,
-    GetRequest, HoldKeyRequest, HoldMouseRequest, HoverRequest, INTERFACE, IsRequest,
-    LaunchRequest, ListAppsRequest, ListNotificationsRequest, ListSurfacesRequest,
-    ListWindowsRequest, METHODS, Modifier, MouseButton, MouseClickRequest, MouseMoveRequest,
-    MouseWheelRequest, MoveWindowRequest, NotificationActionRequest, OBJECT_PATH,
-    PermissionsRequest, PressRequest, RecoveryHint, RefRequest, ResizeWindowRequest,
-    RetryDisposition, ScreenshotRequest, ScrollRequest, SelectRequest, SetValueRequest,
-    SnapshotRequest, StatePredicate, Surface, TypeRequest, WaitRequest, WindowRequest,
-    is_compatible, names, version,
+    DeliveryDisposition, DesktopError, DesktopResponse, Direction, DismissAllNotificationsRequest,
+    DismissNotificationRequest, DragEndpoint, DragRequest, ENVELOPE_VERSION, ElementProperty,
+    ElementStateProperty, FindRequest, FocusWindowRequest, GetRequest, HoldKeyRequest,
+    HoldMouseRequest, HoverRequest, INTERFACE, IsRequest, LaunchRequest, ListAppsRequest,
+    ListNotificationsRequest, ListSurfacesRequest, ListWindowsRequest, METHODS, Modifier,
+    MouseButton, MouseClickRequest, MouseMoveRequest, MouseWheelRequest, MoveWindowRequest,
+    NotificationActionRequest, OBJECT_PATH, PermissionsRequest, PressRequest, RecoveryHint,
+    RefRequest, ResizeWindowRequest, RetryDisposition, ScreenshotRequest, ScrollRequest,
+    SelectRequest, SetValueRequest, SnapshotRequest, StatePredicate, Surface, TypeRequest,
+    WaitRequest, WindowRequest, is_compatible, names, version,
 };
-pub use tinydesktop_bus::CloseAppRequest;

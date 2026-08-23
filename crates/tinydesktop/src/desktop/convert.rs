@@ -82,9 +82,7 @@ pub(super) fn clipboard_format(format: bus::ClipboardFormat) -> core::ClipboardF
 }
 
 /// Converts a contract element property into the engine's.
-pub(super) fn element_property(
-    property: bus::ElementProperty,
-) -> core::commands::get::GetProperty {
+pub(super) fn element_property(property: bus::ElementProperty) -> core::commands::get::GetProperty {
     use core::commands::get::GetProperty;
 
     match property {

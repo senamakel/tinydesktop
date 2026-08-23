@@ -12,11 +12,11 @@
 use std::io;
 use std::time::Duration;
 
-use tinydesktop::{DesktopResponse, names};
 use tinybus::Connection;
 use tinybus::broker::Broker;
 use tinybus::module::ModuleHost;
 use tinybus::transport::memory::MemoryBus;
+use tinydesktop::{DesktopResponse, names};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {

@@ -110,9 +110,9 @@ pub mod names;
 pub mod notifications;
 pub mod observation;
 pub mod system;
+pub mod version;
 pub mod vocabulary;
 pub mod waiting;
-pub mod version;
 
 pub use apps::{
     CloseAppRequest, FocusWindowRequest, LaunchRequest, ListAppsRequest, ListSurfacesRequest,
@@ -135,9 +135,9 @@ pub use notifications::{
 };
 pub use observation::{FindRequest, GetRequest, IsRequest, ScreenshotRequest, SnapshotRequest};
 pub use system::PermissionsRequest;
+pub use version::{CONTRACT_VERSION, is_compatible};
 pub use vocabulary::{
     ClipboardFormat, Direction, ElementProperty, ElementStateProperty, Modifier, MouseButton,
     StatePredicate, Surface,
 };
-pub use version::{CONTRACT_VERSION, is_compatible};
 pub use waiting::WaitRequest;
