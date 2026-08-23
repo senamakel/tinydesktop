@@ -28,9 +28,13 @@ docs/
 Complex modules also carry a module-level `README.md` inside `src/<module>/`
 covering their design, public surface, and important constraints.
 
-The current module-release contract is in
-[`specs/tinybus-module-release.md`](specs/tinybus-module-release.md), with its
+The contract for what this module serves, and why it is shaped that way, is in
+[`specs/desktop-module-contract.md`](specs/desktop-module-contract.md), with its
 implementation sequence in
+[`plans/desktop-module-contract.md`](plans/desktop-module-contract.md). The
+packaging and release contract is in
+[`specs/tinybus-module-release.md`](specs/tinybus-module-release.md), with its
+sequence in
 [`plans/tinybus-module-release.md`](plans/tinybus-module-release.md).
 
 ## Conventions
