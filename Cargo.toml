@@ -2,7 +2,7 @@
 resolver = "3"
 # Every crate in this repository lives under `crates/`, one directory per
 # package, each directory named for the package it holds. There is no root
-# package: the crate a host loads is `crates/template`, the same as any other
+# package: the crate a host loads is `crates/tinydesktop`, the same as any other
 # member. Keeping the root virtual is what makes that uniform — a root package
 # would make one crate structurally different from the rest for no reason other
 # than history, and it is the arrangement this template moved away from.
