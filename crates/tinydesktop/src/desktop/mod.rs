@@ -51,9 +51,9 @@ mod reply;
 mod system;
 mod waiting;
 
-use agent_desktop_core::{
-    AppError, PermissionReport, PlatformAdapter, context::CommandContext,
-};
+use std::path::PathBuf;
+
+use agent_desktop_core::{AppError, PermissionReport, PlatformAdapter, context::CommandContext};
 use serde_json::Value;
 use tinydesktop_bus::DesktopResponse;
 
@@ -81,7 +81,7 @@ use permission::Need;
 #[derive(Debug, Clone, Default)]
 pub struct Desktop {
     session_id: Option<String>,
-    trace: bool,
+    trace_path: Option<PathBuf>,
     trace_strict: bool,
     headed: bool,
 }
@@ -120,23 +120,24 @@ impl Desktop {
         self
     }
 
-    /// Returns this `Desktop` with tracing enabled or disabled.
+    /// Returns this `Desktop` writing a command trace to `path`.
     ///
-    /// Tracing records each command and its outcome into the session, which is
-    /// what makes a failed run reconstructable afterwards. `strict` additionally
-    /// fails a command whose trace could not be written, rather than letting it
-    /// succeed with no record.
+    /// A trace records each command and its outcome, which is what makes a
+    /// failed run reconstructable afterwards. `strict` additionally fails a
+    /// command whose trace could not be written, rather than letting it succeed
+    /// with no record — the right setting when the trace is the audit log
+    /// rather than a debugging aid.
     ///
     /// # Examples
     ///
     /// ```
     /// # use tinydesktop::Desktop;
-    /// let desktop = Desktop::new().with_trace(true, false);
+    /// let desktop = Desktop::new().with_trace("/tmp/run.jsonl", false);
     /// assert!(desktop.is_tracing());
     /// ```
     #[must_use]
-    pub fn with_trace(mut self, trace: bool, strict: bool) -> Self {
-        self.trace = trace;
+    pub fn with_trace(mut self, path: impl Into<PathBuf>, strict: bool) -> Self {
+        self.trace_path = Some(path.into());
         self.trace_strict = strict;
         self
     }
@@ -164,8 +165,8 @@ impl Desktop {
     /// supplies.
     ///
     /// Every field is optional; `null` and `{}` both yield
-    /// [`Desktop::default`]. The recognized fields are `session_id` (a
-    /// string), and `trace`, `trace_strict`, and `headed` (booleans). An
+    /// [`Desktop::default`]. The recognized fields are `session_id` and
+    /// `trace_path` (strings), and `trace_strict` and `headed` (booleans). An
     /// unrecognized field is ignored, so a newer host configuring a field this
     /// version does not know about still loads.
     ///
@@ -197,14 +198,8 @@ impl Desktop {
         };
 
         let mut desktop = Self::default();
-        if let Some(session_id) = object.get("session_id").filter(|value| !value.is_null()) {
-            let session_id = session_id.as_str().ok_or(Error::ConfigFieldType {
-                field: "session_id",
-                expected: "a string",
-            })?;
-            desktop.session_id = Some(session_id.to_owned());
-        }
-        desktop.trace = flag(object.get("trace"), "trace")?;
+        desktop.session_id = text(object.get("session_id"), "session_id")?;
+        desktop.trace_path = text(object.get("trace_path"), "trace_path")?.map(PathBuf::from);
         desktop.trace_strict = flag(object.get("trace_strict"), "trace_strict")?;
         desktop.headed = flag(object.get("headed"), "headed")?;
 
@@ -224,7 +219,7 @@ impl Desktop {
         self.session_id.as_deref()
     }
 
-    /// Whether commands record a trace into the session.
+    /// Whether commands write a trace.
     ///
     /// # Examples
     ///
@@ -234,7 +229,22 @@ impl Desktop {
     /// ```
     #[must_use]
     pub fn is_tracing(&self) -> bool {
-        self.trace
+        self.trace_path.is_some()
+    }
+
+    /// Where commands write their trace, if anywhere.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use std::path::Path;
+    /// # use tinydesktop::Desktop;
+    /// let desktop = Desktop::new().with_trace("/tmp/run.jsonl", true);
+    /// assert_eq!(desktop.trace_path(), Some(Path::new("/tmp/run.jsonl")));
+    /// ```
+    #[must_use]
+    pub fn trace_path(&self) -> Option<&std::path::Path> {
+        self.trace_path.as_deref()
     }
 
     /// Whether ref actions may take focus and move the real cursor.
@@ -252,8 +262,12 @@ impl Desktop {
 
     /// Builds the engine context every command runs under.
     fn context(&self) -> std::result::Result<CommandContext, AppError> {
-        CommandContext::new(self.session_id.clone(), self.trace, self.trace_strict)
-            .map(|context| context.with_headed(self.headed))
+        CommandContext::new(
+            self.session_id.clone(),
+            self.trace_path.clone(),
+            self.trace_strict,
+        )
+        .map(|context| context.with_headed(self.headed))
     }
 
     /// Runs `command` under a fresh adapter and context, and wraps whatever it
@@ -291,6 +305,21 @@ impl Desktop {
         });
 
         reply::envelope(command, result)
+    }
+}
+
+/// Reads an optional string configuration field.
+fn text(value: Option<&Value>, field: &'static str) -> Result<Option<String>> {
+    match value {
+        None | Some(Value::Null) => Ok(None),
+        Some(value) => value
+            .as_str()
+            .map(str::to_owned)
+            .map(Some)
+            .ok_or(Error::ConfigFieldType {
+                field,
+                expected: "a string",
+            }),
     }
 }
 
