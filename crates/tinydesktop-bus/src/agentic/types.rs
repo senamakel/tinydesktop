@@ -34,6 +34,8 @@ pub struct JevConfig {
     pub timeout_ms: Option<u64>,
     /// Additional transient retries. Absent means the client default.
     pub max_retries: Option<u32>,
+    /// Host product attribution for the `TinyHumans` proxy only.
+    pub sdk_name: Option<String>,
 }
 
 impl JevConfig {
@@ -63,6 +65,7 @@ impl std::fmt::Debug for JevConfig {
             .field("model", &self.model)
             .field("timeout_ms", &self.timeout_ms)
             .field("max_retries", &self.max_retries)
+            .field("sdk_name", &self.sdk_name)
             .finish()
     }
 }
@@ -103,6 +106,8 @@ pub struct RunGoalRequest {
     pub max_steps: u32,
     /// Maximum Jev evaluations, capped by the module at 80.
     pub max_model_calls: u32,
+    /// One-use handle from a previous confirmation stop. Other fields are ignored on continuation.
+    pub continuation: Option<GoalContinuation>,
 }
 
 impl Default for RunGoalRequest {
@@ -115,8 +120,18 @@ impl Default for RunGoalRequest {
             include_values: false,
             max_steps: 40,
             max_model_calls: 80,
+            continuation: None,
         }
     }
+}
+
+/// Host response to a pending consequential desktop action.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GoalContinuation {
+    /// Opaque one-use handle returned by the module.
+    pub id: String,
+    /// Whether a person approved the exact pending operation and target.
+    pub approve: bool,
 }
 
 /// A closed operation Jev may select.
@@ -224,6 +239,10 @@ pub enum JevStopReason {
     Blocked,
     /// A destructive step requires the host's confirmation.
     ConfirmationRequired,
+    /// The host declined a pending action.
+    Cancelled,
+    /// The approved target no longer matched the observed desktop.
+    StaleTarget,
     /// Confidence was too low to act.
     LowConfidence,
     /// No caller-supplied value remained for a text action.
@@ -264,6 +283,8 @@ pub struct JevRunResult {
     pub turns: Vec<JevTurn>,
     /// Last decision when the loop stopped before executing it.
     pub pending: Option<JevDecision>,
+    /// One-use handle to approve or decline `pending` through `RunGoal`.
+    pub confirmation_id: Option<String>,
     /// Provider measurements.
     pub metrics: JevMetrics,
 }

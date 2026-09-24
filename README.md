@@ -99,11 +99,23 @@ The Jev provider, endpoint, model, and API key arrive under the module config's
 sensitive host-control traffic, so monitors never receive it and serialized
 ABI buffers are zeroized after use. Reinitialization replaces the served
 `DesktopService` only after the entire new configuration validates.
+For the TinyHumans proxy, the host supplies `jev.sdk_name`; the Jev client
+sanitizes it and sends `x-sdk-name` only to that exact backend endpoint.
 
 Jev receives a closed choice of operations and compatible accessibility refs;
 it never generates text or bypasses desktop delivery checks. Existing field
 values are withheld unless the caller opts in. Actions judged hard to undo
 always stop with `confirmation_required`.
+
+`RunGoal` returns a `confirmation_id` with the pending operation and target.
+After showing those details to a person, the host calls the same confidential
+member with `continuation: {"id": "...", "approve": true}` or `approve: false`.
+The handle expires after ten minutes, is consumed once, and is lost when the
+module is reinitialized. Approval takes a fresh accessibility snapshot and
+executes only if exactly one element still matches the original application,
+window, role, label, path, bounds, state, and required action. A changed or
+ambiguous target returns `stale_target` without acting. Decline returns
+`cancelled`; an expired or replayed handle returns `CONFIRMATION_EXPIRED`.
 
 The opt-in Spotify verifier reads an exported `OPENROUTER_API_KEY`, passes it
 through private initialization, and never writes or prints it:

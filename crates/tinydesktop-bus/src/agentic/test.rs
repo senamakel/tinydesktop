@@ -3,8 +3,8 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use super::{
-    JevConfig, JevDecisionKind, JevOperation, JevProvider, JevStopReason, ResolveIntentRequest,
-    RunGoalRequest,
+    GoalContinuation, JevConfig, JevDecisionKind, JevOperation, JevProvider, JevStopReason,
+    ResolveIntentRequest, RunGoalRequest,
 };
 use serde_json::json;
 
@@ -13,10 +13,12 @@ fn configuration_serializes_the_key_but_never_debug_prints_it() {
     let mut request = JevConfig::new("openrouter-secret");
     request.provider = JevProvider::OpenRouter;
     request.endpoint_url = Some("https://openrouter.ai/api/alpha/decisions".into());
+    request.sdk_name = Some("openhuman".into());
     let value = serde_json::to_value(&request).expect("configuration serializes");
 
     assert_eq!(value["api_key"], json!("openrouter-secret"));
     assert!(!format!("{request:?}").contains("openrouter-secret"));
+    assert_eq!(value["sdk_name"], json!("openhuman"));
 }
 
 #[test]
@@ -75,4 +77,28 @@ fn agentic_requests_default_to_not_sharing_field_values() {
     assert!(!resolve.include_values);
     assert!(!run.include_values);
     assert_eq!((run.max_steps, run.max_model_calls), (40, 80));
+    assert!(run.continuation.is_none());
+}
+
+#[test]
+fn confirmation_payload_has_explicit_approval_and_one_use_handle() {
+    let request: RunGoalRequest = serde_json::from_value(json!({
+        "continuation": {"id": "opaque-handle", "approve": false}
+    }))
+    .expect("continuation decodes");
+    assert_eq!(
+        request.continuation,
+        Some(GoalContinuation {
+            id: "opaque-handle".to_owned(),
+            approve: false,
+        })
+    );
+    assert_eq!(
+        serde_json::to_value(JevStopReason::Cancelled).unwrap(),
+        json!("cancelled")
+    );
+    assert_eq!(
+        serde_json::to_value(JevStopReason::StaleTarget).unwrap(),
+        json!("stale_target")
+    );
 }

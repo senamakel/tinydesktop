@@ -116,9 +116,9 @@ pub mod vocabulary;
 pub mod waiting;
 
 pub use agentic::{
-    JevConfig, JevConfiguration, JevDecision, JevDecisionKind, JevMetrics, JevOperation,
-    JevProvider, JevRunResult, JevStopReason, JevTarget, JevTurn, ResolveIntentRequest,
-    RunGoalRequest,
+    GoalContinuation, JevConfig, JevConfiguration, JevDecision, JevDecisionKind, JevMetrics,
+    JevOperation, JevProvider, JevRunResult, JevStopReason, JevTarget, JevTurn,
+    ResolveIntentRequest, RunGoalRequest,
 };
 pub use apps::{
     CloseAppRequest, FocusWindowRequest, LaunchRequest, ListAppsRequest, ListSurfacesRequest,
