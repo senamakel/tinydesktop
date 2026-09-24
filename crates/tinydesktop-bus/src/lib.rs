@@ -11,7 +11,7 @@
 //! # What is here
 //!
 //! - [`names`] — the interface name, the object path, and one constant per
-//!   member, plus [`names::METHODS`] listing all fifty-four in dispatch order.
+//!   member, plus [`names::METHODS`] listing all fifty-eight in dispatch order.
 //! - [`envelope`] — [`DesktopResponse`], the reply every member returns, and
 //!   the structured [`DesktopError`] it carries on failure.
 //! - [`vocabulary`] — the enumerations shared across payloads: surfaces,
@@ -101,6 +101,7 @@
 //! interface without an entry here fails that crate's tests rather than
 //! surfacing as an unknown method in a host at runtime.
 
+pub mod agentic;
 pub mod apps;
 pub mod clipboard;
 pub mod envelope;
@@ -114,6 +115,11 @@ pub mod version;
 pub mod vocabulary;
 pub mod waiting;
 
+pub use agentic::{
+    ConfigureJevRequest, JevConfiguration, JevDecision, JevDecisionKind, JevMetrics, JevOperation,
+    JevProvider, JevRunResult, JevStopReason, JevTarget, JevTurn, ResolveIntentRequest,
+    RunGoalRequest,
+};
 pub use apps::{
     CloseAppRequest, FocusWindowRequest, LaunchRequest, ListAppsRequest, ListSurfacesRequest,
     ListWindowsRequest, MoveWindowRequest, ResizeWindowRequest, WindowRequest,

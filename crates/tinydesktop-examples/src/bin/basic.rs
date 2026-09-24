@@ -3,7 +3,7 @@
 //! Run it with:
 //!
 //! ```sh
-//! cargo run -p tinydesktop --example basic
+//! cargo run -p tinydesktop-examples --bin basic
 //! ```
 //!
 //! It calls the members that work on any machine — no permission granted, no

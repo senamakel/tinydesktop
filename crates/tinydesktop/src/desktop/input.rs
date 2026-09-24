@@ -137,6 +137,7 @@ impl Desktop {
                     duration_ms: request.duration_ms,
                     drop_delay_ms: request.drop_delay_ms,
                     timeout_ms: request.timeout_ms,
+                    wait_for_scope: drag::WaitForScope::default(),
                 },
                 adapter,
                 context,

@@ -1,0 +1,318 @@
+//! Opt-in real-module Jev exercise against Spotify on macOS.
+//!
+//! This spends `OpenRouter` credit and changes Spotify's visible navigation
+//! state. The module artifact must be attested by a
+//! `modules.toml` beside it so `TinyBus` will deliver the API key confidentially.
+
+use std::{io, path::PathBuf, time::Duration};
+
+use serde_json::Value;
+use tinybus::{Connection, broker::Broker, module::ModuleHost, transport::memory::MemoryBus};
+use tinydesktop_bus::{
+    ConfigureJevRequest, DesktopResponse, FindRequest, FocusWindowRequest, JevProvider,
+    JevRunResult, JevStopReason, LaunchRequest, RefRequest, RunGoalRequest, SnapshotRequest, names,
+};
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let module = module_argument()?;
+    let key = std::env::var("OPENROUTER_API_KEY")
+        .map_err(|_| io::Error::other("OPENROUTER_API_KEY is not exported"))?;
+
+    let bus = MemoryBus::new();
+    let broker = Broker::new();
+    let broker_task = broker.spawn(bus.clone());
+    let module_host = ModuleHost::new(broker);
+    let info = module_host.load_file(&module)?;
+    if info.name != "tinydesktop" {
+        return Err(io::Error::other(format!("loaded unexpected module `{}`", info.name)).into());
+    }
+
+    let client = Connection::connect(bus.connect().await?).await?;
+    wait_for_module(&client).await?;
+    let proxy = client.proxy(names::INTERFACE, names::OBJECT_PATH, names::INTERFACE)?;
+    if proxy.attestation().await?.is_none() {
+        return Err(io::Error::other(
+            "tinydesktop is not attested; generate modules.toml beside the built library",
+        )
+        .into());
+    }
+
+    exercise(&proxy, key).await?;
+    broker_task.abort();
+    Ok(())
+}
+
+async fn exercise(proxy: &tinybus::Proxy, key: String) -> Result<(), Box<dyn std::error::Error>> {
+    let mut jev = ConfigureJevRequest::new(key);
+    jev.provider = JevProvider::OpenRouter;
+    jev.endpoint_url = Some("https://openrouter.ai/api/alpha/decisions".to_owned());
+    jev.model = Some("jev-latest".to_owned());
+    let configured: DesktopResponse = proxy
+        .call_confidential(names::methods::CONFIGURE_JEV, (jev,))
+        .await?;
+    ensure_ok("ConfigureJev", &configured)?;
+
+    let launched = launch_spotify(proxy).await?;
+    println!("Spotify launch is ready");
+    let launch_window = launched.data.as_ref().and_then(|data| data.get("window"));
+    if !launch_window
+        .and_then(|window| window.get("visible"))
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+        && let Some(window_id) = launch_window
+            .and_then(|window| window.get("id"))
+            .and_then(Value::as_str)
+    {
+        let focused: DesktopResponse = proxy
+            .call(
+                names::methods::FOCUS_WINDOW,
+                (FocusWindowRequest {
+                    window_id: Some(window_id.to_owned()),
+                    ..FocusWindowRequest::default()
+                },),
+            )
+            .await?;
+        ensure_ok("FocusWindow", &focused)?;
+    }
+    wait_for_spotify(proxy).await?;
+    pause_if_playing(proxy).await?;
+    let _ = launch_spotify(proxy).await?;
+    wait_for_spotify(proxy).await?;
+
+    let run: DesktopResponse = proxy
+        .call_confidential(
+            names::methods::RUN_GOAL,
+            (RunGoalRequest {
+                app: "Spotify".to_owned(),
+                goal: "Open Liked Songs and ensure the topmost song is playing; choose DONE if it is already playing"
+                    .to_owned(),
+                max_steps: 12,
+                max_model_calls: 20,
+                ..RunGoalRequest::default()
+            },),
+        )
+        .await?;
+    ensure_ok("RunGoal", &run)?;
+    let result: JevRunResult = serde_json::from_value(
+        run.data
+            .clone()
+            .ok_or_else(|| io::Error::other("RunGoal returned no data"))?,
+    )?;
+    report(&result);
+    if result.stop != JevStopReason::Done {
+        return Err(io::Error::other(format!(
+            "Spotify goal stopped as {:?} instead of Done",
+            result.stop
+        ))
+        .into());
+    }
+
+    verify_playback(proxy).await?;
+
+    let _: DesktopResponse = proxy
+        .call_confidential(names::methods::CLEAR_JEV, ())
+        .await?;
+    Ok(())
+}
+
+fn report(result: &JevRunResult) {
+    println!(
+        "Spotify Jev run: stop={:?}, steps={}, calls={}, attempts={}, latency_ms={}, model={}",
+        result.stop,
+        result.turns.len(),
+        result.metrics.calls,
+        result.metrics.attempts,
+        result.metrics.latency_ms,
+        result.metrics.model.as_deref().unwrap_or("unknown")
+    );
+    if let Some(pending) = &result.pending {
+        println!(
+            "pending: decision={:?}, operation={:?}, target={:?}, confidence={:.2}, destructive={:.2}, reason={}",
+            pending.decision,
+            pending.operation,
+            pending.target,
+            pending.confidence,
+            pending.destructive,
+            pending.reason
+        );
+    }
+}
+
+async fn verify_playback(proxy: &tinybus::Proxy) -> Result<(), Box<dyn std::error::Error>> {
+    let snapshot: DesktopResponse = proxy
+        .call(
+            names::methods::SNAPSHOT,
+            (SnapshotRequest {
+                app: Some("Spotify".to_owned()),
+                max_depth: Some(6),
+                ..SnapshotRequest::default()
+            },),
+        )
+        .await?;
+    ensure_ok("Snapshot", &snapshot)?;
+    if !snapshot
+        .data
+        .as_ref()
+        .is_some_and(|data| contains_text(data, "Pause"))
+    {
+        return Err(io::Error::other(
+            "Spotify did not expose a Pause control, so active playback was not verified",
+        )
+        .into());
+    }
+    Ok(())
+}
+
+async fn pause_if_playing(proxy: &tinybus::Proxy) -> Result<(), Box<dyn std::error::Error>> {
+    let found: DesktopResponse = proxy
+        .call(
+            names::methods::FIND,
+            (FindRequest {
+                app: Some("Spotify".to_owned()),
+                role: Some("button".to_owned()),
+                name: Some("Pause".to_owned()),
+                exact: true,
+                first: true,
+                ..FindRequest::default()
+            },),
+        )
+        .await?;
+    let Some(ref_id) = found.data.as_ref().and_then(first_ref) else {
+        return Ok(());
+    };
+    let paused: DesktopResponse = proxy
+        .call(names::methods::CLICK, (RefRequest::new(ref_id),))
+        .await?;
+    ensure_ok("Pause", &paused)?;
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    Ok(())
+}
+
+async fn wait_for_module(connection: &Connection) -> tinybus::Result<()> {
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if connection
+                .list_names()
+                .await?
+                .iter()
+                .any(|name| name.as_str() == names::INTERFACE)
+            {
+                return Ok(());
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .map_err(|_| tinybus::Error::failed("timed out waiting for tinydesktop"))?
+}
+
+async fn wait_for_spotify(proxy: &tinybus::Proxy) -> Result<(), Box<dyn std::error::Error>> {
+    tokio::time::timeout(Duration::from_secs(15), async {
+        loop {
+            let reply: DesktopResponse = proxy
+                .call(
+                    names::methods::SNAPSHOT,
+                    (SnapshotRequest {
+                        app: Some("Spotify".to_owned()),
+                        skeleton: true,
+                        ..SnapshotRequest::default()
+                    },),
+                )
+                .await?;
+            if reply.ok {
+                return tinybus::Result::Ok(());
+            }
+            let _: DesktopResponse = proxy
+                .call(
+                    names::methods::LAUNCH,
+                    (LaunchRequest {
+                        activate: true,
+                        ..LaunchRequest::new("Spotify")
+                    },),
+                )
+                .await?;
+            let _: DesktopResponse = proxy
+                .call(
+                    names::methods::FOCUS_WINDOW,
+                    (FocusWindowRequest {
+                        app: Some("Spotify".to_owned()),
+                        ..FocusWindowRequest::default()
+                    },),
+                )
+                .await?;
+            tokio::time::sleep(Duration::from_millis(250)).await;
+        }
+    })
+    .await
+    .map_err(|_| {
+        io::Error::other("Spotify did not expose an accessibility tree in 15 seconds")
+    })??;
+    Ok(())
+}
+
+async fn launch_spotify(
+    proxy: &tinybus::Proxy,
+) -> Result<DesktopResponse, Box<dyn std::error::Error>> {
+    let reply = tokio::time::timeout(Duration::from_secs(15), async {
+        loop {
+            let reply: DesktopResponse = proxy
+                .call(
+                    names::methods::LAUNCH,
+                    (LaunchRequest {
+                        activate: true,
+                        ..LaunchRequest::new("Spotify")
+                    },),
+                )
+                .await?;
+            if reply.ok {
+                return tinybus::Result::Ok(reply);
+            }
+            tokio::time::sleep(Duration::from_millis(250)).await;
+        }
+    })
+    .await
+    .map_err(|_| io::Error::other("Spotify launch did not settle within 15 seconds"))??;
+    Ok(reply)
+}
+
+fn ensure_ok(name: &str, reply: &DesktopResponse) -> Result<(), io::Error> {
+    if reply.ok {
+        Ok(())
+    } else {
+        Err(io::Error::other(format!(
+            "{name} failed: {}",
+            reply.error.as_ref().map_or_else(
+                || "unknown error".to_owned(),
+                |error| format!("{}: {}", error.code, error.message),
+            )
+        )))
+    }
+}
+
+fn contains_text(value: &Value, needle: &str) -> bool {
+    match value {
+        Value::String(text) => text.contains(needle),
+        Value::Array(values) => values.iter().any(|value| contains_text(value, needle)),
+        Value::Object(values) => values.values().any(|value| contains_text(value, needle)),
+        Value::Null | Value::Bool(_) | Value::Number(_) => false,
+    }
+}
+
+fn first_ref(value: &Value) -> Option<&str> {
+    match value {
+        Value::Object(values) => values
+            .get("ref_id")
+            .and_then(Value::as_str)
+            .or_else(|| values.values().find_map(first_ref)),
+        Value::Array(values) => values.iter().find_map(first_ref),
+        Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => None,
+    }
+}
+
+fn module_argument() -> Result<PathBuf, io::Error> {
+    std::env::args_os()
+        .nth(1)
+        .map(PathBuf::from)
+        .ok_or_else(|| io::Error::other("usage: live_spotify <path-to-attested-module>"))
+}

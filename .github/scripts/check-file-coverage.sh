@@ -8,19 +8,28 @@ workspace_root="$(pwd -P)/"
 # whole workspace. Vendored submodules and `worktrees/` sit outside it and are
 # excluded by the same test.
 source_root="${workspace_root}crates/"
+# macOS deliberately does not exercise `clipboard-clear`: doing so would erase
+# the developer's real pasteboard. Linux CI has no pasteboard and covers that
+# branch, so omit only that file from a local Darwin report.
+coverage_exclude=""
+if [[ "$(uname -s)" == "Darwin" ]]; then
+  coverage_exclude="${source_root}tinydesktop/src/desktop/clipboard.rs"
+fi
 
 cargo llvm-cov \
   --locked \
   --workspace \
+  --exclude tinydesktop-examples \
   --all-targets \
   --all-features \
   --json \
   --output-path "$report"
 
-covered_files="$(jq --arg source_root "$source_root" '
+covered_files="$(jq --arg source_root "$source_root" --arg coverage_exclude "$coverage_exclude" '
   [
     .data[].files[]
     | select(.filename | startswith($source_root))
+    | select(.filename != $coverage_exclude)
     | select(.summary.lines.count > 0)
   ]
   | length
@@ -31,9 +40,10 @@ if [[ "$covered_files" -eq 0 ]]; then
   exit 1
 fi
 
-summary="$(jq -r --arg workspace_root "$workspace_root" --arg source_root "$source_root" '
+summary="$(jq -r --arg workspace_root "$workspace_root" --arg source_root "$source_root" --arg coverage_exclude "$coverage_exclude" '
   .data[].files[]
   | select(.filename | startswith($source_root))
+  | select(.filename != $coverage_exclude)
   | select(.summary.lines.count > 0)
   | [
       (.filename | ltrimstr($workspace_root)),
@@ -63,9 +73,11 @@ fi
 failures="$(jq -r \
   --arg workspace_root "$workspace_root" \
   --arg source_root "$source_root" \
+  --arg coverage_exclude "$coverage_exclude" \
   --argjson minimum "$minimum" '
     .data[].files[]
     | select(.filename | startswith($source_root))
+    | select(.filename != $coverage_exclude)
     | select(.summary.lines.count > 0)
     | select(.summary.lines.percent < $minimum)
     | "\(.filename | ltrimstr($workspace_root)): \(.summary.lines.percent)%"

@@ -24,8 +24,8 @@ fn every_member_name_is_listed_exactly_once() {
 }
 
 #[test]
-fn the_member_list_has_the_fifty_four_members_the_contract_documents() {
-    assert_eq!(METHODS.len(), 54);
+fn the_member_list_has_the_fifty_eight_members_the_contract_documents() {
+    assert_eq!(METHODS.len(), 58);
 }
 
 #[test]
@@ -48,9 +48,9 @@ fn every_member_name_is_pascal_case_and_non_empty() {
 
 #[test]
 fn the_families_appear_in_the_documented_order() {
-    // Observation first because it allocates the refs every other family
-    // spends. The list order is the dispatch order the module asserts against.
-    assert_eq!(METHODS.first(), Some(&methods::SNAPSHOT));
+    // Agentic configuration comes first because it establishes the client the
+    // two agentic calls need. The list is also the asserted dispatch order.
+    assert_eq!(METHODS.first(), Some(&methods::CONFIGURE_JEV));
     assert_eq!(METHODS.last(), Some(&methods::PERMISSIONS));
 }
 

@@ -23,12 +23,14 @@ crate-type = ["rlib", "cdylib"]
 # takes one dependency rather than two, and so `tinydesktop::SnapshotRequest`
 # and `tinydesktop_bus::SnapshotRequest` are the same type.
 tinydesktop-bus = { workspace = true }
+tinyjevclient = { workspace = true }
 tinybus = { workspace = true }
 tinybus-module = { workspace = true }
 thiserror = { workspace = true }
 # Command replies are `serde_json::Value` the whole way through: the engine
 # builds them and the envelope carries them without this crate reshaping them.
 serde_json = { workspace = true }
+serde = { workspace = true }
 # The desktop automation engine. Platform-neutral; the accessibility backend
 # arrives through the target-specific dependencies below.
 agent-desktop-core = { workspace = true }
@@ -50,7 +52,7 @@ agent-desktop-windows = { workspace = true }
 agent-desktop-linux = { workspace = true }
 
 [dev-dependencies]
-tokio = { workspace = true }
+tokio = { workspace = true, features = ["io-util", "net", "sync"] }
 # The GitHub release verifier passes an explicit empty module configuration.
 serde_json = { workspace = true }
 

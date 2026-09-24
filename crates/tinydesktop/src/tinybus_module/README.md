@@ -9,7 +9,7 @@ consumer instead of an `UnknownMethod` at runtime.
 
 ## Why the members are written out
 
-`dispatch.rs` is fifty-four near-identical `async fn`s. They cannot be generated
+`dispatch.rs` is fifty-eight near-identical `async fn`s. They cannot be generated
 by a `macro_rules!` inside the `impl` block: `#[tinybus::interface]` reads that
 block's items to build its dispatch table, and a macro invocation there is still
 unexpanded when the attribute runs. Writing them out is what lets the macro see
@@ -49,5 +49,5 @@ of this module's own source, because reading them back out of the exported
 `extern "C"` function would need `unsafe`, which this workspace forbids.
 
 Integration tests use TinyBus's in-memory transport, and
-`crates/tinydesktop/examples/verify_module.rs` loads a compiled `cdylib` through
+`crates/tinydesktop-examples/src/bin/verify_module.rs` loads a compiled `cdylib` through
 the real dynamic loader before a release archive is accepted.

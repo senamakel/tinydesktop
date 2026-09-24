@@ -10,7 +10,7 @@ payload vocabulary has to be published as an ordinary library. This is it.
 
 | module          | what it holds                                                      |
 | --------------- | ------------------------------------------------------------------ |
-| `names`         | interface name, object path, one constant per member — 54 of them   |
+| `names`         | interface name, object path, one constant per member — 58 of them   |
 | `envelope`      | `DesktopResponse` and the structured `DesktopError` it carries      |
 | `vocabulary`    | surfaces, modifiers, buttons, element properties                    |
 | `observation`   | `Snapshot`, `Find`, `Get`, `Is`, `Screenshot` payloads              |

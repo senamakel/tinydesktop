@@ -3,7 +3,7 @@
 //! Run it with the release tag URL, platform archive, and archive SHA-256:
 //!
 //! ```text
-//! cargo run --example verify_github_release -- \
+//! cargo run -p tinydesktop-examples --bin verify_github_release -- \
 //!   https://github.com/tinyhumansai/tinydesktop/releases/tag/v0.1.4 \
 //!   tinydesktop-0.1.4-ubuntu-24.04-x86_64.tar.gz \
 //!   <sha256>
@@ -16,7 +16,7 @@ use tinybus::Connection;
 use tinybus::broker::Broker;
 use tinybus::module::ModuleHost;
 use tinybus::transport::memory::MemoryBus;
-use tinydesktop::{DesktopResponse, names};
+use tinydesktop_bus::{DesktopResponse, names};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -32,11 +32,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         serde_json::Value::default(),
     )?;
 
-    if info.name != env!("CARGO_PKG_NAME") {
+    if info.name != "tinydesktop" {
         return Err(io::Error::other(format!(
             "loaded module `{}` instead of `{}`",
-            info.name,
-            env!("CARGO_PKG_NAME")
+            info.name, "tinydesktop"
         ))
         .into());
     }

@@ -18,7 +18,7 @@ engine's argument types, the permission preflight, and the bus surface.
 ### Members
 
 - The interface `ai.tinyhumans.tinydesktop.Desktop` is served at
-  `/ai/tinyhumans/tinydesktop/Desktop` with exactly fifty-four members,
+  `/ai/tinyhumans/tinydesktop/Desktop` with exactly fifty-eight members,
   enumerated in dispatch order by `tinydesktop_bus::names::METHODS`.
 - Every member takes at most one request payload and returns a
   `DesktopResponse`. Members taking no argument: `ListDisplays`,
@@ -33,6 +33,19 @@ engine's argument types, the permission preflight, and the bus surface.
 - Session lifecycle, trace read and export, and the engine's bundled skills
   loader are out of contract version 1.0. Adding a member is a minor bump, which
   the bind rule in `tinydesktop_bus::version` permits.
+
+### Jev control
+
+- `ConfigureJev`, `ClearJev`, `ResolveIntent`, and `RunGoal` require TinyBus
+  confidential delivery. The module retains the configured client but never
+  returns, logs, or traces its API key.
+- Jev chooses only from module-supplied operations and compatible refs. Text is
+  caller-supplied, ordinary field values are withheld by default, and a
+  destructive result always stops for confirmation.
+- Execution gates on the selected option's probability, not Jev's distribution
+  concentration. Exact accessible names and explicitly requested first/topmost
+  rows may add deterministic identity evidence but never bypass risk checks.
+- Goal runs stop at 40 actions, 80 evaluations, or three unchanged turns.
 
 ### The envelope
 
@@ -88,7 +101,7 @@ engine's argument types, the permission preflight, and the bus surface.
 - The served interface is exercised over TinyBus's in-memory transport,
   including a member with a payload, a member without one, a member that fails
   closed, and an unknown member.
-- `examples/verify_module.rs` loads the compiled `cdylib` through the real
+- `crates/tinydesktop-examples/src/bin/verify_module.rs` loads the compiled `cdylib` through the real
   dynamic loader and calls `Version` before a release archive is accepted.
 - The generated dispatch table and the embedded module manifest are both
   asserted against `tinydesktop_bus::names::METHODS`.
