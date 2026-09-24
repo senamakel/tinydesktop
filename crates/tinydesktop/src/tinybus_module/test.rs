@@ -321,11 +321,12 @@ async fn private_module_configuration_initializes_jev_without_exposing_the_key()
             json!([{"app": "App", "goal": "finish"}]),
         ),
     ] {
-        let error = service
-            .call(&member.try_into()?, body)
-            .await
-            .expect_err("unconfigured Jev client is unavailable");
-        assert!(error.to_string().contains("not configured"));
+        let reply = service.call(&member.try_into()?, body).await?;
+        let reply: DesktopResponse = serde_json::from_value(reply)?;
+        assert_eq!(
+            reply.error.expect("unconfigured reply").code,
+            "JEV_NOT_CONFIGURED"
+        );
     }
     assert!(DesktopService::from_config(&json!({"jev": {"api_key": 7}})).is_err());
     Ok(())

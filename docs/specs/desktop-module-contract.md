@@ -41,7 +41,12 @@ engine's argument types, the permission preflight, and the bus surface.
   reinitialization; the module never returns, logs, or traces its API key.
 - Jev chooses only from module-supplied operations and compatible refs. Text is
   caller-supplied, ordinary field values are withheld by default, and a
-  destructive result always stops for confirmation.
+  destructive result always stops for confirmation. Local label/goal checks
+  also force confirmation for delete, send, purchase, payment, submission,
+  overwrite, unsafe quit, trash, and sign-out actions.
+- Exact endpoint overrides are limited to the selected provider's published
+  route. Accessibility content is labeled as untrusted data, and observation
+  visits at most 4,096 nodes and 64 levels before returning a bounded view.
 - Execution gates on the selected option's probability, not Jev's distribution
   concentration. Exact accessible names and explicitly requested first/topmost
   rows may add deterministic identity evidence but never bypass risk checks.

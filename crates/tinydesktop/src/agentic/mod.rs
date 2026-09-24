@@ -6,7 +6,7 @@ mod screen;
 #[cfg(test)]
 mod test;
 
-use std::time::Duration;
+use std::{future::Future, pin::Pin, sync::Arc, time::Duration};
 
 use serde_json::json;
 use tinydesktop_bus::{
@@ -14,19 +14,21 @@ use tinydesktop_bus::{
     JevMetrics, JevOperation, JevProvider, JevRunResult, JevStopReason, JevTarget, JevTurn,
     RefRequest, ResolveIntentRequest, RunGoalRequest, ScrollRequest, SetValueRequest, WaitRequest,
 };
-use tinyjevclient::{Client, ClientConfig, Error as JevError, EvaluationResult};
+use tinyjevclient::{
+    Client, ClientConfig, Error as JevError, EvaluationFailure, EvaluationRequest, EvaluationResult,
+};
 
 use crate::Desktop;
 use policy::{
-    action_space, choice, exact_named_match, gate_with_evidence, noul, parse_operation,
-    playing_goal_satisfied, positional_match, shortlist, target,
+    action_space, choice, deterministic_destructive, exact_named_match, gate_with_evidence, noul,
+    parse_operation, playing_goal_satisfied, positional_match, shortlist, target,
 };
 use screen::{Candidate, Screen, fingerprint, observe};
 
 /// Configured Jev transport and non-secret policy metadata.
 #[derive(Clone)]
 pub(crate) struct JevRuntime {
-    client: Client,
+    client: Arc<dyn Evaluator>,
     configuration: JevConfiguration,
 }
 
@@ -34,7 +36,7 @@ impl std::fmt::Debug for JevRuntime {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
             .debug_struct("JevRuntime")
-            .field("client", &self.client)
+            .field("client", &"[configured]")
             .field("configuration", &self.configuration)
             .finish()
     }
@@ -50,6 +52,12 @@ impl JevRuntime {
             }
         };
         if let Some(endpoint) = &request.endpoint_url {
+            if !trusted_endpoint(request.provider, endpoint) {
+                return Err(Box::new(DesktopError::new(
+                    "JEV_INVALID_CONFIG",
+                    "endpoint is not an approved Jev provider route",
+                )));
+            }
             config = config.with_endpoint_url(endpoint);
         }
         if let Some(timeout_ms) = request.timeout_ms {
@@ -60,7 +68,7 @@ impl JevRuntime {
         }
         let client = Client::new(config).map_err(|error| config_error(&error))?;
         Ok(Self {
-            client,
+            client: Arc::new(client),
             configuration: JevConfiguration {
                 provider: request.provider,
                 model: request
@@ -71,6 +79,51 @@ impl JevRuntime {
             },
         })
     }
+}
+
+trait Evaluator: Send + Sync {
+    fn evaluate<'a>(
+        &'a self,
+        request: &'a EvaluationRequest,
+    ) -> Pin<
+        Box<
+            dyn Future<Output = std::result::Result<EvaluationResult, EvaluationFailure>>
+                + Send
+                + 'a,
+        >,
+    >;
+}
+
+impl Evaluator for Client {
+    fn evaluate<'a>(
+        &'a self,
+        request: &'a EvaluationRequest,
+    ) -> Pin<
+        Box<
+            dyn Future<Output = std::result::Result<EvaluationResult, EvaluationFailure>>
+                + Send
+                + 'a,
+        >,
+    > {
+        Box::pin(Client::evaluate(self, request))
+    }
+}
+
+fn trusted_endpoint(provider: JevProvider, endpoint: &str) -> bool {
+    let approved = match provider {
+        JevProvider::TypeSafe => "https://api.typesafe.ai/v1/systemone",
+        JevProvider::OpenRouter => "https://openrouter.ai/api/alpha/decisions",
+        JevProvider::TinyHumansOpenRouter => {
+            "https://api.tinyhumans.ai/agent-integrations/openrouter/systemone"
+        }
+    };
+    if endpoint == approved {
+        return true;
+    }
+    #[cfg(test)]
+    return endpoint.starts_with("http://127.0.0.1:");
+    #[cfg(not(test))]
+    false
 }
 
 pub(crate) async fn resolve_intent(
@@ -96,10 +149,13 @@ async fn resolve_intent_with<B: AgentBackend>(
         request.include_values,
         request.execute,
         &[],
+        true,
     )
     .await;
     match result {
-        Ok(outcome) => response("resolve-intent", &outcome.decision),
+        Ok(outcome) => outcome
+            .action_failure
+            .unwrap_or_else(|| response("resolve-intent", &outcome.decision)),
         Err(error) => *error,
     }
 }
@@ -148,6 +204,7 @@ async fn run_goal_with<B: AgentBackend>(
             request.include_values,
             true,
             &history,
+            metrics.calls.saturating_add(1) < max_calls,
         )
         .await;
         let outcome = match outcome {
@@ -158,14 +215,10 @@ async fn run_goal_with<B: AgentBackend>(
             merge_metrics(&mut metrics, evaluation);
         }
         let decision = outcome.decision;
-        let stop = match decision.decision {
-            JevDecisionKind::Done => Some(JevStopReason::Done),
-            JevDecisionKind::Blocked => Some(JevStopReason::Blocked),
-            JevDecisionKind::ConfirmationRequired => Some(JevStopReason::ConfirmationRequired),
-            JevDecisionKind::Abstain => Some(JevStopReason::LowConfidence),
-            JevDecisionKind::NeedsText => Some(JevStopReason::NeedsText),
-            JevDecisionKind::Act => None,
-        };
+        if let Some(_failure) = outcome.action_failure {
+            return action_failed_response(turns, decision, metrics);
+        }
+        let stop = stop_reason(decision.decision);
         if let Some(stop) = stop {
             return run_response(stop, turns, Some(decision), metrics);
         }
@@ -177,10 +230,11 @@ async fn run_goal_with<B: AgentBackend>(
         } else if decision.operation == JevOperation::Widen {
             root = None;
         }
-        let after = observe_async(backend.clone(), request.app.clone(), root.clone()).await;
-        let changed = after
-            .as_ref()
-            .is_ok_and(|screen| fingerprint(screen) != before_fingerprint)
+        let Ok(after) = observe_async(backend.clone(), request.app.clone(), root.clone()).await
+        else {
+            return action_failed_response(turns, decision, metrics);
+        };
+        let changed = fingerprint(&after) != before_fingerprint
             || matches!(
                 decision.operation,
                 JevOperation::Drill | JevOperation::Widen
@@ -216,6 +270,39 @@ async fn run_goal_with<B: AgentBackend>(
     }
 }
 
+fn stop_reason(decision: JevDecisionKind) -> Option<JevStopReason> {
+    match decision {
+        JevDecisionKind::Done => Some(JevStopReason::Done),
+        JevDecisionKind::Blocked => Some(JevStopReason::Blocked),
+        JevDecisionKind::ConfirmationRequired => Some(JevStopReason::ConfirmationRequired),
+        JevDecisionKind::Abstain => Some(JevStopReason::LowConfidence),
+        JevDecisionKind::NeedsText => Some(JevStopReason::NeedsText),
+        JevDecisionKind::Act => None,
+    }
+}
+
+fn action_failed_response(
+    mut turns: Vec<JevTurn>,
+    decision: JevDecision,
+    metrics: JevMetrics,
+) -> DesktopResponse {
+    turns.push(failed_turn(&turns, &decision));
+    run_response(JevStopReason::ActionFailed, turns, Some(decision), metrics)
+}
+
+fn failed_turn(turns: &[JevTurn], decision: &JevDecision) -> JevTurn {
+    JevTurn {
+        step: u32::try_from(turns.len())
+            .unwrap_or(u32::MAX)
+            .saturating_add(1),
+        operation: decision.operation,
+        target: decision.target.clone(),
+        confidence: decision.confidence,
+        ok: false,
+        changed: false,
+    }
+}
+
 fn run_response(
     stop: JevStopReason,
     turns: Vec<JevTurn>,
@@ -236,6 +323,7 @@ fn run_response(
 struct ResolveOutcome {
     decision: JevDecision,
     evaluations: Vec<EvaluationResult>,
+    action_failure: Option<DesktopResponse>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -249,6 +337,7 @@ async fn resolve<B: AgentBackend>(
     include_values: bool,
     execute: bool,
     history: &[String],
+    allow_rerank: bool,
 ) -> Result<ResolveOutcome, Box<DesktopResponse>> {
     let screen = observe_async(backend.clone(), app.to_owned(), root.map(str::to_owned)).await?;
     resolve_on_screen(
@@ -260,6 +349,7 @@ async fn resolve<B: AgentBackend>(
         include_values,
         execute,
         history,
+        allow_rerank,
     )
     .await
 }
@@ -274,6 +364,7 @@ async fn resolve_on_screen<B: AgentBackend>(
     include_values: bool,
     execute: bool,
     history: &[String],
+    allow_rerank: bool,
 ) -> Result<ResolveOutcome, Box<DesktopResponse>> {
     if let Some(done) = visible_completion(intent, screen) {
         return Ok(done);
@@ -297,7 +388,7 @@ async fn resolve_on_screen<B: AgentBackend>(
     let operation_name = operation_name.to_owned();
     let operation = parse_operation(&operation_name)
         .ok_or_else(|| invalid_response("operation answer was unknown"))?;
-    let destructive = noul(answers.get("destructive"));
+    let mut destructive = noul(answers.get("destructive"));
     let target_answer_name = format!("{}_target", operation_name.to_ascii_lowercase());
     let mut selected = target(&space, &operation_name, answers.get(&target_answer_name))
         .map(|(candidate, confidence)| (candidate.clone(), confidence));
@@ -312,6 +403,7 @@ async fn resolve_on_screen<B: AgentBackend>(
         selected: selected.as_ref(),
         include_values,
         first: &evaluations[0],
+        allow: allow_rerank,
     })
     .await?
     {
@@ -323,6 +415,11 @@ async fn resolve_on_screen<B: AgentBackend>(
     let confidence = selected
         .as_ref()
         .map_or(operation_confidence, |(_, confidence)| *confidence);
+    destructive = destructive.max(local_destructive_score(
+        intent,
+        operation,
+        selected.as_ref(),
+    ));
     let mut decision = gate_with_evidence(
         operation,
         confidence,
@@ -352,23 +449,51 @@ async fn resolve_on_screen<B: AgentBackend>(
         reason: reason(decision, confidence, destructive),
         executed: false,
     };
-    if execute && decision == JevDecisionKind::Act {
-        let response = execute_operation(
-            backend.clone(),
-            operation,
-            selected.map(|(node, _)| node),
-            text.map(str::to_owned),
-        )
-        .await;
-        if !response.ok {
-            return Err(Box::new(response));
-        }
-        out.executed = true;
-    }
+    let (executed, action_failure) = execute_if_requested(
+        backend,
+        execute && decision == JevDecisionKind::Act,
+        operation,
+        selected.map(|(node, _)| node),
+        text,
+    )
+    .await;
+    out.executed = executed;
     Ok(ResolveOutcome {
         decision: out,
         evaluations,
+        action_failure,
     })
+}
+
+fn local_destructive_score(
+    intent: &str,
+    operation: JevOperation,
+    selected: Option<&(Candidate, f64)>,
+) -> f64 {
+    if deterministic_destructive(intent, operation, selected.map(|(candidate, _)| candidate)) {
+        1.0
+    } else {
+        0.0
+    }
+}
+
+async fn execute_if_requested<B: AgentBackend>(
+    backend: &B,
+    execute: bool,
+    operation: JevOperation,
+    target: Option<Candidate>,
+    text: Option<&str>,
+) -> (bool, Option<DesktopResponse>) {
+    if !execute {
+        return (false, None);
+    }
+    let response =
+        execute_operation(backend.clone(), operation, target, text.map(str::to_owned)).await;
+    if response.ok {
+        (true, None)
+    } else {
+        (false, Some(response))
+    }
 }
 
 fn visible_completion(intent: &str, screen: &Screen) -> Option<ResolveOutcome> {
@@ -383,6 +508,7 @@ fn visible_completion(intent: &str, screen: &Screen) -> Option<ResolveOutcome> {
             executed: false,
         },
         evaluations: Vec::new(),
+        action_failure: None,
     })
 }
 
@@ -396,14 +522,16 @@ struct RerankInput<'a> {
     selected: Option<&'a (Candidate, f64)>,
     include_values: bool,
     first: &'a EvaluationResult,
+    allow: bool,
 }
 
 async fn rerank(
     input: RerankInput<'_>,
 ) -> Result<Option<(Option<(Candidate, f64)>, EvaluationResult)>, Box<DesktopResponse>> {
-    if !input
-        .selected
-        .is_some_and(|(_, confidence)| *confidence < policy::ACT)
+    if !input.allow
+        || !input
+            .selected
+            .is_some_and(|(_, confidence)| *confidence < policy::ACT)
     {
         return Ok(None);
     }

@@ -6,6 +6,9 @@ use tinydesktop_bus::{DesktopResponse, SnapshotRequest, Surface};
 
 use crate::Desktop;
 
+const MAX_TREE_DEPTH: usize = 64;
+const MAX_VISITED_NODES: usize = 4_096;
+
 /// One ref-bearing accessibility node offered to Jev.
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(default)]
@@ -101,7 +104,8 @@ pub(super) fn parse_reply(
     let tree = data.get("tree").cloned().unwrap_or(Value::Null);
     let mut root_node: Candidate = serde_json::from_value(tree).unwrap_or_default();
     let mut candidates = Vec::new();
-    collect(&mut root_node, &[], &mut candidates);
+    let mut visited = 0_usize;
+    collect(&mut root_node, &[], &mut candidates, 0, &mut visited);
     candidates.retain(offerable);
     candidates.truncate(254);
 
@@ -122,7 +126,17 @@ pub(super) fn parse_reply(
     })
 }
 
-fn collect(node: &mut Candidate, path: &[String], out: &mut Vec<Candidate>) {
+fn collect(
+    node: &mut Candidate,
+    path: &[String],
+    out: &mut Vec<Candidate>,
+    depth: usize,
+    visited: &mut usize,
+) {
+    if depth > MAX_TREE_DEPTH || *visited >= MAX_VISITED_NODES {
+        return;
+    }
+    *visited = visited.saturating_add(1);
     let label = node
         .name
         .as_deref()
@@ -140,7 +154,7 @@ fn collect(node: &mut Candidate, path: &[String], out: &mut Vec<Candidate>) {
         child_path.push(label);
     }
     for child in &mut node.children {
-        collect(child, &child_path, out);
+        collect(child, &child_path, out, depth.saturating_add(1), visited);
     }
 }
 
@@ -153,20 +167,33 @@ fn offerable(node: &Candidate) -> bool {
 }
 
 fn overlay_role(tree: Option<&Value>) -> Option<&'static str> {
-    let node = tree?;
-    if let Some(role) = node.get("role").and_then(Value::as_str)
-        && matches!(role, "sheet" | "alert" | "menu" | "popover")
-    {
-        return Some(match role {
-            "sheet" => "sheet",
-            "alert" => "alert",
-            "menu" => "menu",
-            _ => "popover",
-        });
+    let mut pending = vec![(tree?, 0_usize)];
+    let mut visited = 0_usize;
+    while let Some((node, depth)) = pending.pop() {
+        if depth > MAX_TREE_DEPTH || visited >= MAX_VISITED_NODES {
+            continue;
+        }
+        visited = visited.saturating_add(1);
+        if let Some(role) = node.get("role").and_then(Value::as_str)
+            && matches!(role, "sheet" | "alert" | "menu" | "popover")
+        {
+            return Some(match role {
+                "sheet" => "sheet",
+                "alert" => "alert",
+                "menu" => "menu",
+                _ => "popover",
+            });
+        }
+        if let Some(children) = node.get("children").and_then(Value::as_array) {
+            pending.extend(
+                children
+                    .iter()
+                    .rev()
+                    .map(|child| (child, depth.saturating_add(1))),
+            );
+        }
     }
-    node.get("children")
-        .and_then(Value::as_array)
-        .and_then(|children| children.iter().find_map(|child| overlay_role(Some(child))))
+    None
 }
 
 pub(super) fn describe(node: &Candidate, include_values: bool) -> Value {
@@ -198,7 +225,7 @@ pub(super) fn describe(node: &Candidate, include_values: bool) -> Value {
     {
         value["bounds"] = bounds.clone();
     }
-    value
+    json!({"untrusted_accessibility_data": value})
 }
 
 pub(super) fn fingerprint(screen: &Screen) -> String {

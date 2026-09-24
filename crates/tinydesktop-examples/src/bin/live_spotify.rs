@@ -5,7 +5,11 @@
 //! `modules.toml` beside it so `TinyBus` will attest confidential goal calls.
 //! The API key itself arrives through sensitive module initialization.
 
-use std::{io, path::PathBuf, time::Duration};
+use std::{
+    fs, io,
+    path::{Path, PathBuf},
+    time::Duration,
+};
 
 use serde_json::Value;
 use tinybus::{Connection, broker::Broker, module::ModuleHost, transport::memory::MemoryBus};
@@ -17,6 +21,7 @@ use tinydesktop_bus::{
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let module = module_argument()?;
+    verify_allowlisted(&module)?;
     let key = std::env::var("OPENROUTER_API_KEY")
         .map_err(|_| io::Error::other("OPENROUTER_API_KEY is not exported"))?;
 
@@ -63,7 +68,7 @@ async fn exercise(proxy: &tinybus::Proxy) -> Result<(), Box<dyn std::error::Erro
             .and_then(|window| window.get("id"))
             .and_then(Value::as_str)
     {
-        let focused: DesktopResponse = proxy
+        let _: DesktopResponse = proxy
             .call(
                 names::methods::FOCUS_WINDOW,
                 (FocusWindowRequest {
@@ -72,7 +77,6 @@ async fn exercise(proxy: &tinybus::Proxy) -> Result<(), Box<dyn std::error::Erro
                 },),
             )
             .await?;
-        ensure_ok("FocusWindow", &focused)?;
     }
     wait_for_spotify(proxy).await?;
     pause_if_playing(proxy).await?;
@@ -136,22 +140,20 @@ fn report(result: &JevRunResult) {
 }
 
 async fn verify_playback(proxy: &tinybus::Proxy) -> Result<(), Box<dyn std::error::Error>> {
-    let snapshot: DesktopResponse = proxy
+    let found: DesktopResponse = proxy
         .call(
-            names::methods::SNAPSHOT,
-            (SnapshotRequest {
+            names::methods::FIND,
+            (FindRequest {
                 app: Some("Spotify".to_owned()),
-                max_depth: Some(6),
-                ..SnapshotRequest::default()
+                role: Some("button".to_owned()),
+                name: Some("Pause".to_owned()),
+                exact: true,
+                first: true,
+                ..FindRequest::default()
             },),
         )
         .await?;
-    ensure_ok("Snapshot", &snapshot)?;
-    if !snapshot
-        .data
-        .as_ref()
-        .is_some_and(|data| contains_text(data, "Pause"))
-    {
+    if !found.ok || found.data.as_ref().and_then(first_ref).is_none() {
         return Err(io::Error::other(
             "Spotify did not expose a Pause control, so active playback was not verified",
         )
@@ -286,15 +288,6 @@ fn ensure_ok(name: &str, reply: &DesktopResponse) -> Result<(), io::Error> {
     }
 }
 
-fn contains_text(value: &Value, needle: &str) -> bool {
-    match value {
-        Value::String(text) => text.contains(needle),
-        Value::Array(values) => values.iter().any(|value| contains_text(value, needle)),
-        Value::Object(values) => values.values().any(|value| contains_text(value, needle)),
-        Value::Null | Value::Bool(_) | Value::Number(_) => false,
-    }
-}
-
 fn first_ref(value: &Value) -> Option<&str> {
     match value {
         Value::Object(values) => values
@@ -304,6 +297,30 @@ fn first_ref(value: &Value) -> Option<&str> {
         Value::Array(values) => values.iter().find_map(first_ref),
         Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => None,
     }
+}
+
+fn verify_allowlisted(module: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    let file_name = module
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| io::Error::other("module path has no UTF-8 file name"))?;
+    let manifest_path = module
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join("modules.toml");
+    let manifest = fs::read_to_string(&manifest_path)
+        .map_err(|_| io::Error::other("modules.toml is required before loading the module"))?;
+    let prefix = format!("\"{file_name}\" = \"");
+    let expected = manifest
+        .lines()
+        .find_map(|line| line.trim().strip_prefix(&prefix))
+        .and_then(|value| value.strip_suffix('"'))
+        .ok_or_else(|| io::Error::other("module is absent from modules.toml"))?;
+    let observed = tinybus::module::sha256_file(module)?;
+    if observed != expected {
+        return Err(io::Error::other("module checksum does not match modules.toml").into());
+    }
+    Ok(())
 }
 
 fn module_argument() -> Result<PathBuf, io::Error> {

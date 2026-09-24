@@ -8,29 +8,24 @@ use std::{
     time::Duration,
 };
 
-use serde_json::json;
-use tinydesktop_bus::{
-    DesktopResponse, JevConfig, JevDecisionKind, JevOperation, JevProvider, JevStopReason,
-    RunGoalRequest,
-};
-use tinyjevclient::{Answer, ChoiceAnswer};
-use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
-    net::TcpListener,
-};
-
 use super::{
-    AgentBackend, JevRuntime, execute_desktop, internal_error,
+    AgentBackend, Evaluator, JevRuntime, execute_desktop, internal_error,
     policy::{
-        ACT, DESTRUCTIVE, FLOOR, action_space, choice, exact_named_match, gate_with_evidence, noul,
-        parse_operation, playing_goal_satisfied, positional_match, request, rerank_request,
-        shortlist, target,
+        ACT, DESTRUCTIVE, FLOOR, action_space, choice, deterministic_destructive,
+        exact_named_match, gate_with_evidence, noul, parse_operation, playing_goal_satisfied,
+        positional_match, request, rerank_request, shortlist, target,
     },
     provider_error, reason, resolve_intent, resolve_intent_with, response as agent_response,
     run_goal, run_goal_with,
     screen::{Candidate, Screen, describe, fingerprint, observe, parse_reply},
     target_payload, visible_completion,
 };
+use serde_json::json;
+use tinydesktop_bus::{
+    DesktopResponse, JevConfig, JevDecisionKind, JevOperation, JevProvider, JevStopReason,
+    RunGoalRequest,
+};
+use tinyjevclient::{Answer, ChoiceAnswer};
 
 #[test]
 fn execution_gates_on_selected_probability_not_distribution_concentration() {
@@ -128,12 +123,45 @@ fn terminal_operations_are_not_treated_as_actions() {
         gate_with_evidence(JevOperation::Blocked, 1.0, 1.0, false),
         JevDecisionKind::Blocked
     );
+    assert_eq!(
+        gate_with_evidence(JevOperation::Done, ACT - 0.01, 0.0, false),
+        JevDecisionKind::Abstain
+    );
+}
+
+#[test]
+fn deterministic_risk_and_identity_checks_fail_closed() {
+    let delete = Candidate {
+        name: Some("Delete account".to_owned()),
+        ..Candidate::default()
+    };
+    assert!(deterministic_destructive(
+        "continue",
+        JevOperation::Click,
+        Some(&delete)
+    ));
+    assert!(!deterministic_destructive(
+        "continue",
+        JevOperation::Scroll,
+        Some(&delete)
+    ));
+    let candidate = Candidate {
+        name: Some("Liked Songs".to_owned()),
+        ..Candidate::default()
+    };
+    assert!(!exact_named_match("open Disliked Songs", Some(&candidate)));
+    let decorated = Candidate {
+        name: Some("Liked Songs Pinned Downloaded Playlist".to_owned()),
+        ..Candidate::default()
+    };
+    assert!(exact_named_match("open Liked Songs", Some(&decorated)));
 }
 
 #[derive(Clone)]
 struct FakeBackend {
     screens: Arc<Mutex<VecDeque<Screen>>>,
     operations: Arc<Mutex<Vec<JevOperation>>>,
+    fail_execute: bool,
 }
 
 impl AgentBackend for FakeBackend {
@@ -160,7 +188,14 @@ impl AgentBackend for FakeBackend {
             .lock()
             .expect("operation lock")
             .push(operation);
-        DesktopResponse::ok("fake", json!({"delivery": "delivered_verified"}))
+        if self.fail_execute {
+            DesktopResponse::err(
+                "fake",
+                tinydesktop_bus::DesktopError::new("ACTION_FAILED", "fake failure"),
+            )
+        } else {
+            DesktopResponse::ok("fake", json!({"delivery": "delivered_verified"}))
+        }
     }
 }
 
@@ -194,7 +229,7 @@ fn two_candidate_screen() -> Screen {
     screen
 }
 
-fn response(operation: &str, probability: f64, target: &str) -> String {
+fn response(operation: &str, probability: f64, target: &str) -> tinyjevclient::EvaluationResult {
     response_with(operation, probability, target, 0.9, 0.05)
 }
 
@@ -204,14 +239,14 @@ fn response_with(
     target: &str,
     selected_target_probability: f64,
     destructive: f64,
-) -> String {
+) -> tinyjevclient::EvaluationResult {
     let remainder = (1.0 - probability) / 3.0;
     let target_probability = if target == "1" {
         selected_target_probability
     } else {
         1.0 - selected_target_probability
     };
-    json!({
+    evaluation(json!({
         "model": "typesafe/jev-1.13-20260917",
         "answers": {
             "operation": {
@@ -230,41 +265,54 @@ fn response_with(
             "destructive": {"type": "noul", "noul": destructive}
         },
         "usage": {"input_tokens": 10, "output_tokens": 2}
-    })
-    .to_string()
+    }))
 }
 
-async fn server(bodies: Vec<String>) -> String {
-    let listener = TcpListener::bind("127.0.0.1:0")
-        .await
-        .expect("loopback binds");
-    let address = listener.local_addr().expect("listener has address");
-    tokio::spawn(async move {
-        for body in bodies {
-            let (mut stream, _) = listener.accept().await.expect("request connects");
-            let mut request = vec![0_u8; 32_768];
-            let _ = stream.read(&mut request).await.expect("request reads");
-            let reply = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-                body.len()
-            );
-            stream
-                .write_all(reply.as_bytes())
-                .await
-                .expect("reply writes");
-        }
-    });
-    format!("http://{address}/decisions")
+fn evaluation(value: serde_json::Value) -> tinyjevclient::EvaluationResult {
+    let response = serde_json::from_value(value).expect("mock response decodes");
+    tinyjevclient::EvaluationResult {
+        response,
+        request_id: Some("mock-request".to_owned()),
+        attempts: 1,
+        latency: Duration::from_millis(1),
+    }
 }
 
-async fn runtime(bodies: Vec<String>) -> JevRuntime {
-    let endpoint = server(bodies).await;
-    let mut config =
-        tinyjevclient::ClientConfig::openrouter("test-key").with_endpoint_url(endpoint);
-    config.timeout = Duration::from_secs(1);
-    config.retry.max_retries = 0;
+struct MockEvaluator {
+    results: Mutex<VecDeque<tinyjevclient::EvaluationResult>>,
+}
+
+impl Evaluator for MockEvaluator {
+    fn evaluate<'a>(
+        &'a self,
+        _request: &'a tinyjevclient::EvaluationRequest,
+    ) -> std::pin::Pin<
+        Box<
+            dyn std::future::Future<
+                    Output = Result<
+                        tinyjevclient::EvaluationResult,
+                        tinyjevclient::EvaluationFailure,
+                    >,
+                > + Send
+                + 'a,
+        >,
+    > {
+        Box::pin(async move {
+            Ok(self
+                .results
+                .lock()
+                .expect("evaluation lock")
+                .pop_front()
+                .expect("mock evaluation"))
+        })
+    }
+}
+
+fn runtime(results: Vec<tinyjevclient::EvaluationResult>) -> JevRuntime {
     JevRuntime {
-        client: tinyjevclient::Client::new(config).expect("client config is valid"),
+        client: Arc::new(MockEvaluator {
+            results: Mutex::new(VecDeque::from(results)),
+        }),
         configuration: tinydesktop_bus::JevConfiguration {
             provider: tinydesktop_bus::JevProvider::OpenRouter,
             model: "jev-latest".to_owned(),
@@ -283,6 +331,7 @@ fn backend(screen_count: usize) -> (FakeBackend, Arc<Mutex<Vec<JevOperation>>>) 
                     .collect::<Vec<_>>(),
             ))),
             operations: Arc::clone(&operations),
+            fail_execute: false,
         },
         operations,
     )
@@ -293,8 +342,7 @@ async fn goal_loop_executes_a_safe_choice_then_stops_done() {
     let runtime = runtime(vec![
         response("CLICK", 0.9, "1"),
         response("DONE", 0.9, "none"),
-    ])
-    .await;
+    ]);
     let (backend, operations) = backend(3);
     let reply = run_goal_with(
         backend,
@@ -321,13 +369,13 @@ async fn goal_loop_executes_a_safe_choice_then_stops_done() {
 }
 
 async fn run_case(
-    bodies: Vec<String>,
+    bodies: Vec<tinyjevclient::EvaluationResult>,
     screen_count: usize,
     max_steps: u32,
     max_model_calls: u32,
     goal: &str,
 ) -> tinydesktop_bus::JevRunResult {
-    let runtime = runtime(bodies).await;
+    let runtime = runtime(bodies);
     let (backend, _) = backend(screen_count);
     let reply = run_goal_with(
         backend,
@@ -365,6 +413,16 @@ async fn goal_loop_reports_terminal_policy_outcomes() {
     )
     .await;
     assert_eq!(confirmation.stop, JevStopReason::ConfirmationRequired);
+
+    let no_target = run_case(
+        vec![response("CLICK", 0.9, "none")],
+        1,
+        3,
+        3,
+        "activate something",
+    )
+    .await;
+    assert_eq!(no_target.stop, JevStopReason::LowConfidence);
 }
 
 #[tokio::test]
@@ -404,6 +462,50 @@ async fn goal_loop_enforces_action_model_and_stall_budgets() {
     assert_eq!(stalled.stop, JevStopReason::Stalled);
 }
 
+#[tokio::test]
+async fn goal_loop_preserves_failed_actions_and_post_action_observation_failures() {
+    let failed_runtime = runtime(vec![response("CLICK", 0.9, "1")]);
+    let operations = Arc::new(Mutex::new(Vec::new()));
+    let failed_backend = FakeBackend {
+        screens: Arc::new(Mutex::new(VecDeque::from([clickable_screen()]))),
+        operations: Arc::clone(&operations),
+        fail_execute: true,
+    };
+    let failed = run_goal_with(
+        failed_backend,
+        failed_runtime,
+        RunGoalRequest {
+            app: "Spotify".to_owned(),
+            goal: "play the topmost song".to_owned(),
+            ..RunGoalRequest::default()
+        },
+    )
+    .await;
+    let failed: tinydesktop_bus::JevRunResult =
+        serde_json::from_value(failed.data.expect("failed run data")).expect("result decodes");
+    assert_eq!(failed.stop, JevStopReason::ActionFailed);
+    assert_eq!(failed.turns.len(), 1);
+    assert!(!failed.turns[0].ok);
+
+    let observation_runtime = runtime(vec![response("CLICK", 0.9, "1")]);
+    let (backend, _) = backend(1);
+    let lost_screen = run_goal_with(
+        backend,
+        observation_runtime,
+        RunGoalRequest {
+            app: "Spotify".to_owned(),
+            goal: "play the topmost song".to_owned(),
+            ..RunGoalRequest::default()
+        },
+    )
+    .await;
+    let lost_screen: tinydesktop_bus::JevRunResult =
+        serde_json::from_value(lost_screen.data.expect("lost screen data"))
+            .expect("result decodes");
+    assert_eq!(lost_screen.stop, JevStopReason::ActionFailed);
+    assert_eq!(lost_screen.turns.len(), 1);
+}
+
 #[test]
 fn screen_parsing_filters_disabled_nodes_and_builds_descriptions() {
     let reply = DesktopResponse::ok(
@@ -419,7 +521,10 @@ fn screen_parsing_filters_disabled_nodes_and_builds_descriptions() {
     let screen = parse_reply(&crate::Desktop::new(), "Spotify", Some("@s:root"), reply)
         .expect("synthetic snapshot parses");
     assert_eq!(screen.candidates.len(), 1);
-    assert_eq!(describe(&screen.candidates[0], false)["contains"], json!(4));
+    assert_eq!(
+        describe(&screen.candidates[0], false)["untrusted_accessibility_data"]["contains"],
+        json!(4)
+    );
     assert!(fingerprint(&screen).contains("Play First Song"));
 }
 
@@ -523,18 +628,52 @@ fn screen_helpers_cover_overlay_values_bounds_and_failed_observation() {
     let screen = parse_reply(&crate::Desktop::new(), "App", None, reply)
         .expect("original synthetic overlay remains usable");
     let with_values = describe(&screen.candidates[0], true);
-    assert!(with_values.get("holds").is_some());
-    assert!(with_values.get("state").is_some());
+    assert!(
+        with_values["untrusted_accessibility_data"]
+            .get("holds")
+            .is_some()
+    );
+    assert!(
+        with_values["untrusted_accessibility_data"]
+            .get("state")
+            .is_some()
+    );
     let unnamed = Candidate {
         role: "button".to_owned(),
         bounds: Some(json!({"x": 1.0, "y": 2.0})),
         ..Candidate::default()
     };
-    assert!(describe(&unnamed, false).get("bounds").is_some());
+    assert!(
+        describe(&unnamed, false)["untrusted_accessibility_data"]
+            .get("bounds")
+            .is_some()
+    );
 
     let failed = observe(&crate::Desktop::new(), "__tinydesktop_missing__", None)
         .expect_err("missing app fails");
     assert!(!failed.ok);
+    assert!(
+        observe(
+            &crate::Desktop::new(),
+            "__tinydesktop_missing__",
+            Some("@s:e1")
+        )
+        .is_err()
+    );
+
+    for role in ["alert", "menu", "popover"] {
+        let screen = parse_reply(
+            &crate::Desktop::new(),
+            "__tinydesktop_missing__",
+            None,
+            DesktopResponse::ok(
+                "snapshot",
+                json!({"app": "App", "tree": {"role": role, "children": []}}),
+            ),
+        )
+        .expect("synthetic overlay remains usable");
+        assert_eq!(screen.surface, "window");
+    }
 
     let failed_reply = DesktopResponse::err(
         "snapshot",
@@ -549,6 +688,41 @@ fn screen_helpers_cover_overlay_values_bounds_and_failed_observation() {
         error: None,
     };
     assert!(parse_reply(&crate::Desktop::new(), "App", Some("@s:root"), no_data).is_err());
+}
+
+#[test]
+fn accessibility_tree_traversal_is_bounded() {
+    let mut deep = json!({
+        "ref_id": "@s:deep",
+        "role": "button",
+        "available_actions": ["Click"]
+    });
+    for _ in 0..66 {
+        deep = json!({"role": "group", "children": [deep]});
+    }
+    let bounded = parse_reply(
+        &crate::Desktop::new(),
+        "App",
+        Some("@s:root"),
+        DesktopResponse::ok("snapshot", json!({"app": "App", "tree": deep})),
+    )
+    .expect("deep tree is bounded");
+    assert!(bounded.candidates.is_empty());
+
+    let many = (0..4_100)
+        .map(|index| json!({"role": "group", "name": format!("node-{index}")}))
+        .collect::<Vec<_>>();
+    let bounded = parse_reply(
+        &crate::Desktop::new(),
+        "App",
+        Some("@s:root"),
+        DesktopResponse::ok(
+            "snapshot",
+            json!({"app": "App", "tree": {"role": "window", "children": many}}),
+        ),
+    )
+    .expect("wide tree is bounded");
+    assert!(bounded.candidates.is_empty());
 }
 
 #[test]
@@ -568,6 +742,10 @@ fn runtime_configuration_covers_all_providers_and_rejects_empty_keys() {
         assert_eq!(runtime.configuration.provider, provider);
     }
     assert!(JevRuntime::configure(&JevConfig::default()).is_err());
+    let mut untrusted = JevConfig::new("key");
+    untrusted.provider = JevProvider::OpenRouter;
+    untrusted.endpoint_url = Some("https://attacker.example/decisions".to_owned());
+    assert!(JevRuntime::configure(&untrusted).is_err());
 }
 
 #[test]
@@ -603,7 +781,7 @@ fn desktop_execution_dispatches_every_closed_operation_without_panicking() {
 
 #[tokio::test]
 async fn one_step_resolution_and_public_wrappers_cover_success_and_observation_failure() {
-    let runtime = runtime(vec![response("CLICK", 0.9, "1")]).await;
+    let runtime = runtime(vec![response("CLICK", 0.9, "1")]);
     assert!(format!("{runtime:?}").contains("JevRuntime"));
     let (backend, _) = backend(1);
     let reply = resolve_intent_with(
@@ -646,7 +824,7 @@ async fn one_step_resolution_and_public_wrappers_cover_success_and_observation_f
 
 #[tokio::test]
 async fn one_step_resolution_reranks_a_close_target_shortlist() {
-    let first = json!({
+    let first = evaluation(json!({
         "model": "typesafe/jev-1.13-20260917",
         "answers": {
             "operation": {"type": "choice", "choice": "CLICK", "confidence": 0.4,
@@ -656,21 +834,20 @@ async fn one_step_resolution_reranks_a_close_target_shortlist() {
             "destructive": {"type": "noul", "noul": 0.05}
         },
         "usage": {}
-    })
-    .to_string();
-    let reranked = json!({
+    }));
+    let reranked = evaluation(json!({
         "model": "typesafe/jev-1.13-20260917",
         "answers": {
             "target": {"type": "choice", "choice": "2", "confidence": 0.6,
                 "probabilities": {"1": 0.1, "2": 0.85, "none": 0.05}}
         },
         "usage": {}
-    })
-    .to_string();
-    let runtime = runtime(vec![first, reranked]).await;
+    }));
+    let runtime = runtime(vec![first, reranked]);
     let backend = FakeBackend {
         screens: Arc::new(Mutex::new(VecDeque::from([two_candidate_screen()]))),
         operations: Arc::new(Mutex::new(Vec::new())),
+        fail_execute: false,
     };
     let reply = resolve_intent_with(
         backend,

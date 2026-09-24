@@ -272,10 +272,18 @@ pub(super) fn gate_with_evidence(
     exact_named_match: bool,
 ) -> JevDecisionKind {
     if operation == JevOperation::Done {
-        return JevDecisionKind::Done;
+        return if confidence >= ACT {
+            JevDecisionKind::Done
+        } else {
+            JevDecisionKind::Abstain
+        };
     }
     if operation == JevOperation::Blocked {
-        return JevDecisionKind::Blocked;
+        return if confidence >= ACT {
+            JevDecisionKind::Blocked
+        } else {
+            JevDecisionKind::Abstain
+        };
     }
     if confidence < FLOOR && !(exact_named_match && confidence >= CORROBORATED_FLOOR) {
         return JevDecisionKind::Abstain;
@@ -312,7 +320,52 @@ pub(super) fn exact_named_match(goal: &str, candidate: Option<&Candidate>) -> bo
         normalized.split_whitespace().collect::<Vec<_>>().join(" ")
     };
     let name = normalize(name);
-    name.split_whitespace().count() >= 2 && normalize(goal).contains(&name)
+    let goal = normalize(goal);
+    let words = name.split_whitespace().collect::<Vec<_>>();
+    if words.len() < 2 {
+        return false;
+    }
+    let padded_goal = format!(" {goal} ");
+    (2..=words.len()).rev().any(|length| {
+        let prefix = words[..length].join(" ");
+        padded_goal.contains(&format!(" {prefix} "))
+    })
+}
+
+pub(super) fn deterministic_destructive(
+    goal: &str,
+    operation: JevOperation,
+    candidate: Option<&Candidate>,
+) -> bool {
+    if !matches!(operation, JevOperation::Click | JevOperation::TypeText) {
+        return false;
+    }
+    let mut evidence = goal.to_ascii_lowercase();
+    if let Some(label) = candidate.and_then(|candidate| {
+        candidate
+            .name
+            .as_deref()
+            .or(candidate.description.as_deref())
+    }) {
+        evidence.push(' ');
+        evidence.push_str(&label.to_ascii_lowercase());
+    }
+    [
+        "delete",
+        "remove",
+        "send",
+        "purchase",
+        "buy",
+        "pay",
+        "submit",
+        "confirm",
+        "overwrite",
+        "quit without saving",
+        "empty trash",
+        "sign out",
+    ]
+    .iter()
+    .any(|term| evidence.contains(term))
 }
 
 pub(super) fn positional_match(

@@ -89,14 +89,18 @@ impl DesktopService {
         &self,
         request: ResolveIntentRequest,
     ) -> TinyBusResult<DesktopResponse> {
-        let runtime = self.jev_runtime()?;
+        let Some(runtime) = self.jev_runtime() else {
+            return Ok(jev_not_configured("resolve-intent"));
+        };
         Ok(agentic::resolve_intent(self.desktop.clone(), runtime, request).await)
     }
 
     /// Runs a bounded Jev observe-decide-act loop.
     #[tinybus(confidential)]
     async fn run_goal(&self, request: RunGoalRequest) -> TinyBusResult<DesktopResponse> {
-        let runtime = self.jev_runtime()?;
+        let Some(runtime) = self.jev_runtime() else {
+            return Ok(jev_not_configured("run-goal"));
+        };
         Ok(agentic::run_goal(self.desktop.clone(), runtime, request).await)
     }
 
@@ -393,9 +397,17 @@ impl DesktopService {
 }
 
 impl DesktopService {
-    fn jev_runtime(&self) -> TinyBusResult<agentic::JevRuntime> {
-        self.jev
-            .clone()
-            .ok_or_else(|| TinyBusError::failed("Jev is not configured"))
+    fn jev_runtime(&self) -> Option<agentic::JevRuntime> {
+        self.jev.clone()
     }
+}
+
+fn jev_not_configured(command: &str) -> DesktopResponse {
+    DesktopResponse::err(
+        command,
+        tinydesktop_bus::DesktopError::new(
+            "JEV_NOT_CONFIGURED",
+            "Jev must be supplied through private module configuration",
+        ),
+    )
 }

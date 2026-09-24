@@ -2,7 +2,10 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
-use super::{JevConfig, JevProvider, ResolveIntentRequest, RunGoalRequest};
+use super::{
+    JevConfig, JevDecisionKind, JevOperation, JevProvider, JevStopReason, ResolveIntentRequest,
+    RunGoalRequest,
+};
 use serde_json::json;
 
 #[test]
@@ -14,6 +17,46 @@ fn configuration_serializes_the_key_but_never_debug_prints_it() {
 
     assert_eq!(value["api_key"], json!("openrouter-secret"));
     assert!(!format!("{request:?}").contains("openrouter-secret"));
+}
+
+#[test]
+fn every_agentic_enum_pins_its_wire_spelling() {
+    assert_eq!(
+        serde_json::to_value(JevProvider::TypeSafe).unwrap(),
+        json!("type_safe")
+    );
+    assert_eq!(
+        serde_json::to_value(JevProvider::OpenRouter).unwrap(),
+        json!("open_router")
+    );
+    assert_eq!(
+        serde_json::to_value(JevProvider::TinyHumansOpenRouter).unwrap(),
+        json!("tiny_humans_open_router")
+    );
+    for (operation, wire) in [
+        (JevOperation::Click, "CLICK"),
+        (JevOperation::TypeText, "TYPE_TEXT"),
+        (JevOperation::Check, "CHECK"),
+        (JevOperation::Uncheck, "UNCHECK"),
+        (JevOperation::Expand, "EXPAND"),
+        (JevOperation::Collapse, "COLLAPSE"),
+        (JevOperation::Scroll, "SCROLL"),
+        (JevOperation::Drill, "DRILL"),
+        (JevOperation::Widen, "WIDEN"),
+        (JevOperation::Wait, "WAIT"),
+        (JevOperation::Done, "DONE"),
+        (JevOperation::Blocked, "BLOCKED"),
+    ] {
+        assert_eq!(serde_json::to_value(operation).unwrap(), json!(wire));
+    }
+    assert_eq!(
+        serde_json::to_value(JevDecisionKind::ConfirmationRequired).unwrap(),
+        json!("confirmation_required")
+    );
+    assert_eq!(
+        serde_json::to_value(JevStopReason::ActionFailed).unwrap(),
+        json!("action_failed")
+    );
 }
 
 #[test]

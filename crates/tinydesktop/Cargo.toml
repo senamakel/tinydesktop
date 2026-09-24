@@ -52,7 +52,7 @@ agent-desktop-windows = { workspace = true }
 agent-desktop-linux = { workspace = true }
 
 [dev-dependencies]
-tokio = { workspace = true, features = ["io-util", "net", "sync"] }
+tokio = { workspace = true }
 # The GitHub release verifier passes an explicit empty module configuration.
 serde_json = { workspace = true }
 
