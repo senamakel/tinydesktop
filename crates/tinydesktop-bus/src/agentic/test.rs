@@ -13,10 +13,12 @@ fn configuration_serializes_the_key_but_never_debug_prints_it() {
     let mut request = JevConfig::new("openrouter-secret");
     request.provider = JevProvider::OpenRouter;
     request.endpoint_url = Some("https://openrouter.ai/api/alpha/decisions".into());
+    request.sdk_name = Some("openhuman".into());
     let value = serde_json::to_value(&request).expect("configuration serializes");
 
     assert_eq!(value["api_key"], json!("openrouter-secret"));
     assert!(!format!("{request:?}").contains("openrouter-secret"));
+    assert_eq!(value["sdk_name"], json!("openhuman"));
 }
 
 #[test]

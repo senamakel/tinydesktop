@@ -34,6 +34,8 @@ pub struct JevConfig {
     pub timeout_ms: Option<u64>,
     /// Additional transient retries. Absent means the client default.
     pub max_retries: Option<u32>,
+    /// Host product attribution for the `TinyHumans` proxy only.
+    pub sdk_name: Option<String>,
 }
 
 impl JevConfig {
@@ -63,6 +65,7 @@ impl std::fmt::Debug for JevConfig {
             .field("model", &self.model)
             .field("timeout_ms", &self.timeout_ms)
             .field("max_retries", &self.max_retries)
+            .field("sdk_name", &self.sdk_name)
             .finish()
     }
 }

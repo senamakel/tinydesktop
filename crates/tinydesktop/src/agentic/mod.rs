@@ -87,6 +87,11 @@ impl JevRuntime {
         if let Some(max_retries) = request.max_retries {
             config.retry.max_retries = max_retries;
         }
+        if request.provider == JevProvider::TinyHumansOpenRouter
+            && let Some(sdk_name) = request.sdk_name.as_deref()
+        {
+            config = config.with_sdk_name(sdk_name);
+        }
         let client = Client::new(config).map_err(|error| config_error(&error))?;
         Ok(Self {
             client: Arc::new(client),

@@ -99,6 +99,8 @@ The Jev provider, endpoint, model, and API key arrive under the module config's
 sensitive host-control traffic, so monitors never receive it and serialized
 ABI buffers are zeroized after use. Reinitialization replaces the served
 `DesktopService` only after the entire new configuration validates.
+For the TinyHumans proxy, the host supplies `jev.sdk_name`; the Jev client
+sanitizes it and sends `x-sdk-name` only to that exact backend endpoint.
 
 Jev receives a closed choice of operations and compatible accessibility refs;
 it never generates text or bypasses desktop delivery checks. Existing field
