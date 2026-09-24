@@ -39,7 +39,7 @@ fn the_shipped_contract_binds_to_itself() {
 
 #[test]
 fn the_module_serves_every_member_the_contract_names() {
-    assert_eq!(METHODS.len(), 58);
+    assert_eq!(METHODS.len(), 56);
     assert!(METHODS.contains(&names::methods::SNAPSHOT));
     assert!(METHODS.contains(&names::methods::PERMISSIONS));
 }

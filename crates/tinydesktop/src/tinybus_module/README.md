@@ -9,7 +9,7 @@ consumer instead of an `UnknownMethod` at runtime.
 
 ## Why the members are written out
 
-`dispatch.rs` is fifty-eight near-identical `async fn`s. They cannot be generated
+`dispatch.rs` is fifty-six near-identical `async fn`s. They cannot be generated
 by a `macro_rules!` inside the `impl` block: `#[tinybus::interface]` reads that
 block's items to build its dispatch table, and a macro invocation there is still
 unexpanded when the attribute runs. Writing them out is what lets the macro see
@@ -34,9 +34,11 @@ same reason — one to run a blocking command on, one to keep answering on.
 
 The module takes its configuration from the loader as a JSON object, parsed into
 `Desktop` by `Desktop::from_config`: `session_id` and `trace_path` as strings,
-`trace_strict` and `headed` as booleans. An unreadable configuration fails the
-load rather than falling back to defaults — a module silently ignoring the
-session it was told to join would allocate refs nothing else can spend.
+`trace_strict` and `headed` as booleans. An optional `jev` object configures the
+provider, model, endpoint, and API key before the service is registered.
+TinyBus treats initial and replacement module configuration as sensitive
+host-control traffic. An unreadable configuration fails before replacing the
+served object rather than falling back to defaults.
 
 ## The manifest
 

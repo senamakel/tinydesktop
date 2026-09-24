@@ -18,7 +18,7 @@ engine's argument types, the permission preflight, and the bus surface.
 ### Members
 
 - The interface `ai.tinyhumans.tinydesktop.Desktop` is served at
-  `/ai/tinyhumans/tinydesktop/Desktop` with exactly fifty-eight members,
+  `/ai/tinyhumans/tinydesktop/Desktop` with exactly fifty-six members,
   enumerated in dispatch order by `tinydesktop_bus::names::METHODS`.
 - Every member takes at most one request payload and returns a
   `DesktopResponse`. Members taking no argument: `ListDisplays`,
@@ -36,9 +36,9 @@ engine's argument types, the permission preflight, and the bus surface.
 
 ### Jev control
 
-- `ConfigureJev`, `ClearJev`, `ResolveIntent`, and `RunGoal` require TinyBus
-  confidential delivery. The module retains the configured client but never
-  returns, logs, or traces its API key.
+- `ResolveIntent` and `RunGoal` require TinyBus confidential delivery. Jev
+  configuration arrives through sensitive module initialization or
+  reinitialization; the module never returns, logs, or traces its API key.
 - Jev chooses only from module-supplied operations and compatible refs. Text is
   caller-supplied, ordinary field values are withheld by default, and a
   destructive result always stops for confirmation.
@@ -85,9 +85,14 @@ engine's argument types, the permission preflight, and the bus surface.
 ### Configuration and concurrency
 
 - The module's configuration is a JSON object with optional `session_id` and
-  `trace_path` strings and `trace_strict` and `headed` booleans. `null` and `{}`
-  yield defaults; an unrecognized field is ignored; a recognized field of the
-  wrong type fails the load.
+  `trace_path` strings, `trace_strict` and `headed` booleans, and a `jev`
+  object containing provider configuration and its API key. `null` and `{}`
+  yield desktop defaults with Jev disabled; invalid recognized fields fail
+  before the served object is replaced.
+- TinyBus sensitive initialization and reinitialization carry the `jev` object.
+  Reinitialization constructs the complete replacement service before
+  `serve_at`, so a rejected key, endpoint, or desktop field leaves the existing
+  service intact.
 - Commands run on a blocking thread pool, not on the connection's dispatch task,
   because a dense snapshot or a thirty-second wait would otherwise stall every
   other caller.

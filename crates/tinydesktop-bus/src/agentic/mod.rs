@@ -3,7 +3,7 @@
 mod types;
 
 pub use types::{
-    ConfigureJevRequest, JevConfiguration, JevDecision, JevDecisionKind, JevMetrics, JevOperation,
+    JevConfig, JevConfiguration, JevDecision, JevDecisionKind, JevMetrics, JevOperation,
     JevProvider, JevRunResult, JevStopReason, JevTarget, JevTurn, ResolveIntentRequest,
     RunGoalRequest,
 };

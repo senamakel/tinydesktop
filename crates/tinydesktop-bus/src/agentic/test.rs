@@ -2,12 +2,12 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
-use super::{ConfigureJevRequest, JevProvider, ResolveIntentRequest, RunGoalRequest};
+use super::{JevConfig, JevProvider, ResolveIntentRequest, RunGoalRequest};
 use serde_json::json;
 
 #[test]
 fn configuration_serializes_the_key_but_never_debug_prints_it() {
-    let mut request = ConfigureJevRequest::new("openrouter-secret");
+    let mut request = JevConfig::new("openrouter-secret");
     request.provider = JevProvider::OpenRouter;
     request.endpoint_url = Some("https://openrouter.ai/api/alpha/decisions".into());
     let value = serde_json::to_value(&request).expect("configuration serializes");

@@ -21,7 +21,7 @@ pub enum JevProvider {
 /// [`Debug`](std::fmt::Debug) implementation never prints the API key.
 #[derive(Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
-pub struct ConfigureJevRequest {
+pub struct JevConfig {
     api_key: String,
     /// Provider whose response contract should be validated.
     pub provider: JevProvider,
@@ -36,7 +36,7 @@ pub struct ConfigureJevRequest {
     pub max_retries: Option<u32>,
 }
 
-impl ConfigureJevRequest {
+impl JevConfig {
     /// Builds a configuration carrying `api_key` and provider defaults.
     #[must_use]
     pub fn new(api_key: impl Into<String>) -> Self {
@@ -53,10 +53,10 @@ impl ConfigureJevRequest {
     }
 }
 
-impl std::fmt::Debug for ConfigureJevRequest {
+impl std::fmt::Debug for JevConfig {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
-            .debug_struct("ConfigureJevRequest")
+            .debug_struct("JevConfig")
             .field("api_key", &"[REDACTED]")
             .field("provider", &self.provider)
             .field("endpoint_url", &self.endpoint_url)

@@ -10,8 +10,8 @@ use std::{
 
 use serde_json::json;
 use tinydesktop_bus::{
-    ConfigureJevRequest, DesktopResponse, JevDecisionKind, JevOperation, JevProvider,
-    JevStopReason, RunGoalRequest,
+    DesktopResponse, JevConfig, JevDecisionKind, JevOperation, JevProvider, JevStopReason,
+    RunGoalRequest,
 };
 use tinyjevclient::{Answer, ChoiceAnswer};
 use tokio::{
@@ -23,12 +23,13 @@ use super::{
     AgentBackend, JevRuntime, execute_desktop, internal_error,
     policy::{
         ACT, DESTRUCTIVE, FLOOR, action_space, choice, exact_named_match, gate_with_evidence, noul,
-        parse_operation, positional_match, request, rerank_request, shortlist, target,
+        parse_operation, playing_goal_satisfied, positional_match, request, rerank_request,
+        shortlist, target,
     },
     provider_error, reason, resolve_intent, resolve_intent_with, response as agent_response,
     run_goal, run_goal_with,
     screen::{Candidate, Screen, describe, fingerprint, observe, parse_reply},
-    target_payload,
+    target_payload, visible_completion,
 };
 
 #[test]
@@ -103,6 +104,18 @@ fn topmost_play_target_is_strong_positional_evidence() {
         gate_with_evidence(JevOperation::Click, 0.49, 0.05, true),
         JevDecisionKind::Act
     );
+}
+
+#[test]
+fn visible_pause_on_the_top_track_completes_a_playing_goal() {
+    let mut screen = two_candidate_screen();
+    screen.candidates[0].name = Some("Pause First Song by Artist".to_owned());
+    assert!(playing_goal_satisfied(
+        "ensure the topmost song is playing",
+        &screen
+    ));
+    assert!(visible_completion("ensure the topmost song is playing", &screen).is_some());
+    assert!(!playing_goal_satisfied("open the playlist", &screen));
 }
 
 #[test]
@@ -545,16 +558,16 @@ fn runtime_configuration_covers_all_providers_and_rejects_empty_keys() {
         JevProvider::OpenRouter,
         JevProvider::TinyHumansOpenRouter,
     ] {
-        let mut request = ConfigureJevRequest::new("key");
+        let mut request = JevConfig::new("key");
         request.provider = provider;
         request.model = Some("jev-test".to_owned());
         request.timeout_ms = Some(500);
         request.max_retries = Some(0);
         request.endpoint_url = Some("http://127.0.0.1:1/decisions".to_owned());
         let runtime = JevRuntime::configure(&request).expect("configuration is valid");
-        assert_eq!(runtime.configuration().provider, provider);
+        assert_eq!(runtime.configuration.provider, provider);
     }
-    assert!(JevRuntime::configure(&ConfigureJevRequest::default()).is_err());
+    assert!(JevRuntime::configure(&JevConfig::default()).is_err());
 }
 
 #[test]

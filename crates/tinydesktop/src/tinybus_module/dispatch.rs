@@ -12,14 +12,12 @@
 //! invocation inside that block is still unexpanded when it does. Writing them
 //! out is what lets the macro see them.
 
-use std::sync::{Arc, RwLock};
-
 use tinybus::{Error as TinyBusError, Result as TinyBusResult};
 use tinydesktop_bus::{
-    ClipboardGetRequest, ClipboardSetRequest, CloseAppRequest, ConfigureJevRequest,
-    DesktopResponse, DismissAllNotificationsRequest, DismissNotificationRequest, DragRequest,
-    FindRequest, FocusWindowRequest, GetRequest, HoldKeyRequest, HoldMouseRequest, HoverRequest,
-    IsRequest, LaunchRequest, ListAppsRequest, ListNotificationsRequest, ListSurfacesRequest,
+    ClipboardGetRequest, ClipboardSetRequest, CloseAppRequest, DesktopResponse,
+    DismissAllNotificationsRequest, DismissNotificationRequest, DragRequest, FindRequest,
+    FocusWindowRequest, GetRequest, HoldKeyRequest, HoldMouseRequest, HoverRequest, IsRequest,
+    JevConfig, LaunchRequest, ListAppsRequest, ListNotificationsRequest, ListSurfacesRequest,
     ListWindowsRequest, MouseClickRequest, MouseMoveRequest, MouseWheelRequest, MoveWindowRequest,
     NotificationActionRequest, PermissionsRequest, PressRequest, RefRequest, ResizeWindowRequest,
     ResolveIntentRequest, RunGoalRequest, ScreenshotRequest, ScrollRequest, SelectRequest,
@@ -36,7 +34,7 @@ use crate::{Desktop, Result, agentic};
 #[derive(Debug, Clone)]
 pub(crate) struct DesktopService {
     desktop: Desktop,
-    jev: Arc<RwLock<Option<agentic::JevRuntime>>>,
+    jev: Option<agentic::JevRuntime>,
 }
 
 impl DesktopService {
@@ -46,10 +44,24 @@ impl DesktopService {
     ///
     /// Propagates whatever [`Desktop::from_config`] rejects.
     pub(crate) fn from_config(config: &serde_json::Value) -> Result<Self> {
-        Ok(Self {
-            desktop: Desktop::from_config(config)?,
-            jev: Arc::new(RwLock::new(None)),
-        })
+        let desktop = Desktop::from_config(config)?;
+        let jev = config
+            .as_object()
+            .and_then(|object| object.get("jev"))
+            .map(|value| {
+                let config: JevConfig = serde_json::from_value(value.clone()).map_err(|_| {
+                    crate::Error::ConfigFieldType {
+                        field: "jev",
+                        expected: "a valid Jev configuration object",
+                    }
+                })?;
+                agentic::JevRuntime::configure(&config).map_err(|_| crate::Error::ConfigFieldType {
+                    field: "jev",
+                    expected: "a valid Jev configuration object",
+                })
+            })
+            .transpose()?;
+        Ok(Self { desktop, jev })
     }
 
     /// Runs one engine command on a blocking thread.
@@ -71,39 +83,6 @@ impl DesktopService {
 
 #[tinybus::interface(name = "ai.tinyhumans.tinydesktop.Desktop")]
 impl DesktopService {
-    /// Replaces the retained Jev client after validating every setting.
-    #[tinybus(confidential)]
-    async fn configure_jev(&self, request: ConfigureJevRequest) -> TinyBusResult<DesktopResponse> {
-        tokio::task::yield_now().await;
-        let runtime = match agentic::JevRuntime::configure(&request) {
-            Ok(runtime) => runtime,
-            Err(error) => return Ok(DesktopResponse::err("configure-jev", *error)),
-        };
-        let configuration = runtime.configuration().clone();
-        *self
-            .jev
-            .write()
-            .map_err(|_| TinyBusError::failed("Jev configuration lock was poisoned"))? =
-            Some(runtime);
-        let data = serde_json::to_value(configuration)
-            .map_err(|error| TinyBusError::failed(format!("cannot encode Jev status: {error}")))?;
-        Ok(DesktopResponse::ok("configure-jev", data))
-    }
-
-    /// Removes the retained Jev client and API key.
-    #[tinybus(confidential)]
-    async fn clear_jev(&self) -> TinyBusResult<DesktopResponse> {
-        tokio::task::yield_now().await;
-        *self
-            .jev
-            .write()
-            .map_err(|_| TinyBusError::failed("Jev configuration lock was poisoned"))? = None;
-        Ok(DesktopResponse::ok(
-            "clear-jev",
-            serde_json::json!({"configured": false}),
-        ))
-    }
-
     /// Resolves one natural-language intent against the current screen.
     #[tinybus(confidential)]
     async fn resolve_intent(
@@ -416,8 +395,6 @@ impl DesktopService {
 impl DesktopService {
     fn jev_runtime(&self) -> TinyBusResult<agentic::JevRuntime> {
         self.jev
-            .read()
-            .map_err(|_| TinyBusError::failed("Jev configuration lock was poisoned"))?
             .clone()
             .ok_or_else(|| TinyBusError::failed("Jev is not configured"))
     }

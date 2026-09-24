@@ -20,12 +20,6 @@ pub const OBJECT_PATH: &str = "/ai/tinyhumans/tinydesktop/Desktop";
 /// Every member returns a [`crate::DesktopResponse`], including on failure;
 /// see [`crate::envelope`] for why.
 pub mod methods {
-    /// Configures the retained Jev client. Requires confidential delivery.
-    /// Takes a [`crate::ConfigureJevRequest`].
-    pub const CONFIGURE_JEV: &str = "ConfigureJev";
-    /// Clears the retained Jev client. Requires confidential delivery and
-    /// takes no argument.
-    pub const CLEAR_JEV: &str = "ClearJev";
     /// Resolves one natural-language intent. Requires confidential delivery.
     /// Takes a [`crate::ResolveIntentRequest`].
     pub const RESOLVE_INTENT: &str = "ResolveIntent";
@@ -206,8 +200,6 @@ pub mod methods {
 /// `crates/tinydesktop` asserts both its dispatch table and its declared
 /// manifest methods against this list, so the three cannot drift.
 pub const METHODS: &[&str] = &[
-    methods::CONFIGURE_JEV,
-    methods::CLEAR_JEV,
     methods::RESOLVE_INTENT,
     methods::RUN_GOAL,
     methods::SNAPSHOT,

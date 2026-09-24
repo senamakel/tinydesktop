@@ -531,7 +531,7 @@ fn sweep() -> Vec<tinydesktop_bus::DesktopResponse> {
 
 #[test]
 fn the_sweep_covers_every_member_the_contract_names() {
-    assert_eq!(sweep().len() + 4, bus::METHODS.len());
+    assert_eq!(sweep().len() + 2, bus::METHODS.len());
 }
 
 #[test]

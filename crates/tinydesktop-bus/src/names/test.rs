@@ -24,8 +24,8 @@ fn every_member_name_is_listed_exactly_once() {
 }
 
 #[test]
-fn the_member_list_has_the_fifty_eight_members_the_contract_documents() {
-    assert_eq!(METHODS.len(), 58);
+fn the_member_list_has_the_fifty_six_members_the_contract_documents() {
+    assert_eq!(METHODS.len(), 56);
 }
 
 #[test]
@@ -48,9 +48,9 @@ fn every_member_name_is_pascal_case_and_non_empty() {
 
 #[test]
 fn the_families_appear_in_the_documented_order() {
-    // Agentic configuration comes first because it establishes the client the
-    // two agentic calls need. The list is also the asserted dispatch order.
-    assert_eq!(METHODS.first(), Some(&methods::CONFIGURE_JEV));
+    // Agentic goal members come first because they compose the primitive
+    // families below. The list is also the asserted dispatch order.
+    assert_eq!(METHODS.first(), Some(&methods::RESOLVE_INTENT));
     assert_eq!(METHODS.last(), Some(&methods::PERMISSIONS));
 }
 

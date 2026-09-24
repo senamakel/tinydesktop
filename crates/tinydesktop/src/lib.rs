@@ -2,7 +2,7 @@
 //!
 //! tinydesktop wraps the [`agent-desktop`] engine — accessibility-tree
 //! observation and interaction for macOS, Windows, and Linux — and serves it
-//! over `TinyBus` as fifty-eight typed members. A host loads the compiled
+//! over `TinyBus` as fifty-six typed members. A host loads the compiled
 //! `cdylib`, and an agent behind that host gets structured access to any
 //! running application: no screenshots to interpret, no pixel matching, no
 //! browser.
@@ -106,18 +106,17 @@ pub use error::{Error, Result};
 pub use tinydesktop_bus;
 pub use tinydesktop_bus::CloseAppRequest;
 pub use tinydesktop_bus::{
-    CONTRACT_VERSION, ClipboardFormat, ClipboardGetRequest, ClipboardSetRequest,
-    ConfigureJevRequest, Delivery, DeliveryDisposition, DesktopError, DesktopResponse, Direction,
-    DismissAllNotificationsRequest, DismissNotificationRequest, DragEndpoint, DragRequest,
-    ENVELOPE_VERSION, ElementProperty, ElementStateProperty, FindRequest, FocusWindowRequest,
-    GetRequest, HoldKeyRequest, HoldMouseRequest, HoverRequest, INTERFACE, IsRequest,
-    JevConfiguration, JevDecision, JevDecisionKind, JevMetrics, JevOperation, JevProvider,
-    JevRunResult, JevStopReason, JevTarget, JevTurn, LaunchRequest, ListAppsRequest,
-    ListNotificationsRequest, ListSurfacesRequest, ListWindowsRequest, METHODS, Modifier,
-    MouseButton, MouseClickRequest, MouseMoveRequest, MouseWheelRequest, MoveWindowRequest,
-    NotificationActionRequest, OBJECT_PATH, PermissionsRequest, PressRequest, RecoveryHint,
-    RefRequest, ResizeWindowRequest, ResolveIntentRequest, RetryDisposition, RunGoalRequest,
-    ScreenshotRequest, ScrollRequest, SelectRequest, SetValueRequest, SnapshotRequest,
-    StatePredicate, Surface, TypeRequest, WaitRequest, WindowRequest, is_compatible, names,
-    version,
+    CONTRACT_VERSION, ClipboardFormat, ClipboardGetRequest, ClipboardSetRequest, Delivery,
+    DeliveryDisposition, DesktopError, DesktopResponse, Direction, DismissAllNotificationsRequest,
+    DismissNotificationRequest, DragEndpoint, DragRequest, ENVELOPE_VERSION, ElementProperty,
+    ElementStateProperty, FindRequest, FocusWindowRequest, GetRequest, HoldKeyRequest,
+    HoldMouseRequest, HoverRequest, INTERFACE, IsRequest, JevConfig, JevConfiguration, JevDecision,
+    JevDecisionKind, JevMetrics, JevOperation, JevProvider, JevRunResult, JevStopReason, JevTarget,
+    JevTurn, LaunchRequest, ListAppsRequest, ListNotificationsRequest, ListSurfacesRequest,
+    ListWindowsRequest, METHODS, Modifier, MouseButton, MouseClickRequest, MouseMoveRequest,
+    MouseWheelRequest, MoveWindowRequest, NotificationActionRequest, OBJECT_PATH,
+    PermissionsRequest, PressRequest, RecoveryHint, RefRequest, ResizeWindowRequest,
+    ResolveIntentRequest, RetryDisposition, RunGoalRequest, ScreenshotRequest, ScrollRequest,
+    SelectRequest, SetValueRequest, SnapshotRequest, StatePredicate, Surface, TypeRequest,
+    WaitRequest, WindowRequest, is_compatible, names, version,
 };

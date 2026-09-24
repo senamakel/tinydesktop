@@ -10,17 +10,16 @@ use std::time::Duration;
 
 use serde_json::json;
 use tinydesktop_bus::{
-    ConfigureJevRequest, DesktopError, DesktopResponse, JevConfiguration, JevDecision,
-    JevDecisionKind, JevMetrics, JevOperation, JevProvider, JevRunResult, JevStopReason, JevTarget,
-    JevTurn, RefRequest, ResolveIntentRequest, RunGoalRequest, ScrollRequest, SetValueRequest,
-    WaitRequest,
+    DesktopError, DesktopResponse, JevConfig, JevConfiguration, JevDecision, JevDecisionKind,
+    JevMetrics, JevOperation, JevProvider, JevRunResult, JevStopReason, JevTarget, JevTurn,
+    RefRequest, ResolveIntentRequest, RunGoalRequest, ScrollRequest, SetValueRequest, WaitRequest,
 };
 use tinyjevclient::{Client, ClientConfig, Error as JevError, EvaluationResult};
 
 use crate::Desktop;
 use policy::{
     action_space, choice, exact_named_match, gate_with_evidence, noul, parse_operation,
-    positional_match, shortlist, target,
+    playing_goal_satisfied, positional_match, shortlist, target,
 };
 use screen::{Candidate, Screen, fingerprint, observe};
 
@@ -42,7 +41,7 @@ impl std::fmt::Debug for JevRuntime {
 }
 
 impl JevRuntime {
-    pub(crate) fn configure(request: &ConfigureJevRequest) -> Result<Self, Box<DesktopError>> {
+    pub(crate) fn configure(request: &JevConfig) -> Result<Self, Box<DesktopError>> {
         let mut config = match request.provider {
             JevProvider::TypeSafe => ClientConfig::new(request.api_key()),
             JevProvider::OpenRouter => ClientConfig::openrouter(request.api_key()),
@@ -71,10 +70,6 @@ impl JevRuntime {
                 endpoint_url: request.endpoint_url.clone(),
             },
         })
-    }
-
-    pub(crate) fn configuration(&self) -> &JevConfiguration {
-        &self.configuration
     }
 }
 
@@ -280,6 +275,9 @@ async fn resolve_on_screen<B: AgentBackend>(
     execute: bool,
     history: &[String],
 ) -> Result<ResolveOutcome, Box<DesktopResponse>> {
+    if let Some(done) = visible_completion(intent, screen) {
+        return Ok(done);
+    }
     let space = action_space(screen, text.is_some());
     let evaluation = runtime
         .client
@@ -370,6 +368,21 @@ async fn resolve_on_screen<B: AgentBackend>(
     Ok(ResolveOutcome {
         decision: out,
         evaluations,
+    })
+}
+
+fn visible_completion(intent: &str, screen: &Screen) -> Option<ResolveOutcome> {
+    playing_goal_satisfied(intent, screen).then(|| ResolveOutcome {
+        decision: JevDecision {
+            decision: JevDecisionKind::Done,
+            operation: JevOperation::Done,
+            target: None,
+            confidence: 1.0,
+            destructive: 0.0,
+            reason: "the requested playback state is visibly satisfied".to_owned(),
+            executed: false,
+        },
+        evaluations: Vec::new(),
     })
 }
 

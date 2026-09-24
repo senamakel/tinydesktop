@@ -2,15 +2,16 @@
 //!
 //! This spends `OpenRouter` credit and changes Spotify's visible navigation
 //! state. The module artifact must be attested by a
-//! `modules.toml` beside it so `TinyBus` will deliver the API key confidentially.
+//! `modules.toml` beside it so `TinyBus` will attest confidential goal calls.
+//! The API key itself arrives through sensitive module initialization.
 
 use std::{io, path::PathBuf, time::Duration};
 
 use serde_json::Value;
 use tinybus::{Connection, broker::Broker, module::ModuleHost, transport::memory::MemoryBus};
 use tinydesktop_bus::{
-    ConfigureJevRequest, DesktopResponse, FindRequest, FocusWindowRequest, JevProvider,
-    JevRunResult, JevStopReason, LaunchRequest, RefRequest, RunGoalRequest, SnapshotRequest, names,
+    DesktopResponse, FindRequest, FocusWindowRequest, JevConfig, JevProvider, JevRunResult,
+    JevStopReason, LaunchRequest, RefRequest, RunGoalRequest, SnapshotRequest, names,
 };
 
 #[tokio::main]
@@ -30,6 +31,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let client = Connection::connect(bus.connect().await?).await?;
     wait_for_module(&client).await?;
+    let mut jev = JevConfig::new(key);
+    jev.provider = JevProvider::OpenRouter;
+    jev.endpoint_url = Some("https://openrouter.ai/api/alpha/decisions".to_owned());
+    jev.model = Some("jev-latest".to_owned());
+    client
+        .reinitialize_module("tinydesktop", serde_json::json!({"jev": jev}))
+        .await?;
     let proxy = client.proxy(names::INTERFACE, names::OBJECT_PATH, names::INTERFACE)?;
     if proxy.attestation().await?.is_none() {
         return Err(io::Error::other(
@@ -38,21 +46,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .into());
     }
 
-    exercise(&proxy, key).await?;
+    exercise(&proxy).await?;
     broker_task.abort();
     Ok(())
 }
 
-async fn exercise(proxy: &tinybus::Proxy, key: String) -> Result<(), Box<dyn std::error::Error>> {
-    let mut jev = ConfigureJevRequest::new(key);
-    jev.provider = JevProvider::OpenRouter;
-    jev.endpoint_url = Some("https://openrouter.ai/api/alpha/decisions".to_owned());
-    jev.model = Some("jev-latest".to_owned());
-    let configured: DesktopResponse = proxy
-        .call_confidential(names::methods::CONFIGURE_JEV, (jev,))
-        .await?;
-    ensure_ok("ConfigureJev", &configured)?;
-
+async fn exercise(proxy: &tinybus::Proxy) -> Result<(), Box<dyn std::error::Error>> {
     let launched = launch_spotify(proxy).await?;
     println!("Spotify launch is ready");
     let launch_window = launched.data.as_ref().and_then(|data| data.get("window"));
@@ -110,9 +109,6 @@ async fn exercise(proxy: &tinybus::Proxy, key: String) -> Result<(), Box<dyn std
 
     verify_playback(proxy).await?;
 
-    let _: DesktopResponse = proxy
-        .call_confidential(names::methods::CLEAR_JEV, ())
-        .await?;
     Ok(())
 }
 

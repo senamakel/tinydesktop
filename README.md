@@ -4,7 +4,7 @@ Native desktop automation as an installable TinyBus module.
 
 tinydesktop wraps [`agent-desktop`](https://github.com/lahfir/agent-desktop) —
 accessibility-tree observation and interaction for macOS, Windows, and Linux —
-and serves it over TinyBus as fifty-eight typed members. A host loads the
+and serves it over TinyBus as fifty-six typed members. A host loads the
 compiled `cdylib`, and an agent behind that host gets structured access to any
 running application: no screenshots to interpret, no pixel matching, no browser.
 
@@ -68,7 +68,7 @@ Fifty-four members, listed in dispatch order by `tinydesktop_bus::names::METHODS
 
 | Family | Members |
 | --- | --- |
-| Agentic Jev control | `ConfigureJev` `ClearJev` `ResolveIntent` `RunGoal` |
+| Agentic Jev control | `ResolveIntent` `RunGoal` |
 | Observation | `Snapshot` `Find` `Get` `Is` `Screenshot` |
 | Interaction | `Click` `DoubleClick` `TripleClick` `RightClick` `Type` `SetValue` `Clear` `Focus` `Select` `Toggle` `Check` `Uncheck` `Expand` `Collapse` `Scroll` `ScrollTo` |
 | Input | `Press` `KeyDown` `KeyUp` `Hover` `Drag` `MouseMove` `MouseClick` `MouseDown` `MouseUp` `MouseWheel` |
@@ -89,18 +89,24 @@ are deliberately absent from contract 1.0; see [`ROADMAP.md`](ROADMAP.md).
 
 ## Jev-driven control
 
-`ConfigureJev`, `ClearJev`, `ResolveIntent`, and `RunGoal` compose the desktop
-primitives into a native observe-decide-act loop. They are confidential-only
-TinyBus members: ordinary calls are rejected, and the bus requires an attested
-module before it will deliver the API key.
+`ResolveIntent` and `RunGoal` compose the desktop primitives into a native
+observe-decide-act loop. They are confidential-only TinyBus members: ordinary
+calls are rejected, and the bus requires an attested module before delivering
+goals or caller-supplied text.
+
+The Jev provider, endpoint, model, and API key arrive under the module config's
+`jev` field. TinyBus marks module load and reinitialization configuration as
+sensitive host-control traffic, so monitors never receive it and serialized
+ABI buffers are zeroized after use. Reinitialization replaces the served
+`DesktopService` only after the entire new configuration validates.
 
 Jev receives a closed choice of operations and compatible accessibility refs;
 it never generates text or bypasses desktop delivery checks. Existing field
 values are withheld unless the caller opts in. Actions judged hard to undo
 always stop with `confirmation_required`.
 
-The opt-in Spotify verifier reads an exported `OPENROUTER_API_KEY`, sends it
-confidentially, and never writes or prints it:
+The opt-in Spotify verifier reads an exported `OPENROUTER_API_KEY`, passes it
+through private initialization, and never writes or prints it:
 
 ```sh
 cargo run -p tinydesktop-examples --bin live_spotify -- \

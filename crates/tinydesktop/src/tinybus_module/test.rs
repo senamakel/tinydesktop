@@ -262,8 +262,6 @@ fn the_wire_sweep_covers_every_member_except_the_one_with_no_safe_input() {
     assert_eq!(
         missing,
         vec![
-            &names::methods::CONFIGURE_JEV,
-            &names::methods::CLEAR_JEV,
             &names::methods::RESOLVE_INTENT,
             &names::methods::RUN_GOAL,
             &names::methods::CLIPBOARD_CLEAR,
@@ -274,12 +272,7 @@ fn the_wire_sweep_covers_every_member_except_the_one_with_no_safe_input() {
 #[test]
 fn every_agentic_member_requires_confidential_delivery() {
     let service = service();
-    for member in [
-        names::methods::CONFIGURE_JEV,
-        names::methods::CLEAR_JEV,
-        names::methods::RESOLVE_INTENT,
-        names::methods::RUN_GOAL,
-    ] {
+    for member in [names::methods::RESOLVE_INTENT, names::methods::RUN_GOAL] {
         assert!(
             service.requires_confidential(&member.try_into().expect("valid member")),
             "{member} was ordinary"
@@ -295,32 +288,29 @@ fn every_agentic_member_requires_confidential_delivery() {
 }
 
 #[tokio::test]
-async fn agentic_configuration_rotates_and_clears_without_exposing_the_key() -> tinybus::Result<()>
-{
-    let service = service();
-    let configured = service
+async fn private_module_configuration_initializes_jev_without_exposing_the_key()
+-> tinybus::Result<()> {
+    let configured_service = DesktopService::from_config(&json!({
+        "jev": {
+            "api_key": "test-secret",
+            "provider": "open_router",
+            "endpoint_url": "http://127.0.0.1:1/decisions",
+            "model": "jev-test",
+            "max_retries": 0
+        }
+    }))
+    .expect("private Jev configuration is valid");
+    let resolved = configured_service
         .call(
-            &names::methods::CONFIGURE_JEV.try_into()?,
-            json!([{
-                "api_key": "test-secret",
-                "provider": "open_router",
-                "endpoint_url": "http://127.0.0.1:1/decisions",
-                "model": "jev-test",
-                "max_retries": 0
-            }]),
+            &names::methods::RESOLVE_INTENT.try_into()?,
+            json!([{"app": "__tinydesktop_missing__", "intent": "click"}]),
         )
         .await?;
-    let configured: DesktopResponse = serde_json::from_value(configured)?;
-    assert!(configured.ok);
-    let rendered = configured.data.expect("configuration status").to_string();
-    assert!(!rendered.contains("test-secret"));
+    let resolved: DesktopResponse = serde_json::from_value(resolved)?;
+    assert!(!resolved.ok);
+    assert!(!format!("{resolved:?}").contains("test-secret"));
 
-    let cleared = service
-        .call(&names::methods::CLEAR_JEV.try_into()?, json!([]))
-        .await?;
-    let cleared: DesktopResponse = serde_json::from_value(cleared)?;
-    assert!(cleared.ok);
-
+    let service = service();
     for (member, body) in [
         (
             names::methods::RESOLVE_INTENT,
@@ -334,9 +324,10 @@ async fn agentic_configuration_rotates_and_clears_without_exposing_the_key() -> 
         let error = service
             .call(&member.try_into()?, body)
             .await
-            .expect_err("cleared Jev client is unavailable");
+            .expect_err("unconfigured Jev client is unavailable");
         assert!(error.to_string().contains("not configured"));
     }
+    assert!(DesktopService::from_config(&json!({"jev": {"api_key": 7}})).is_err());
     Ok(())
 }
 

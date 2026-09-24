@@ -361,6 +361,46 @@ pub(super) fn positional_match(
     })
 }
 
+pub(super) fn playing_goal_satisfied(goal: &str, screen: &Screen) -> bool {
+    let goal = goal.to_ascii_lowercase();
+    if !goal.contains("playing") {
+        return false;
+    }
+    if !(goal.contains("topmost") || goal.contains("first")) {
+        return screen.candidates.iter().any(|candidate| {
+            candidate
+                .name
+                .as_deref()
+                .is_some_and(|name| name.eq_ignore_ascii_case("Pause"))
+        });
+    }
+    let mut tracks = screen
+        .candidates
+        .iter()
+        .filter(|candidate| {
+            candidate.name.as_deref().is_some_and(|name| {
+                let name = name.to_ascii_lowercase();
+                name.contains(" by ") && (name.starts_with("play ") || name.starts_with("pause "))
+            })
+        })
+        .filter_map(|candidate| {
+            candidate
+                .bounds
+                .as_ref()
+                .and_then(|bounds| bounds.get("y"))
+                .and_then(serde_json::Value::as_f64)
+                .map(|y| (y, candidate))
+        })
+        .collect::<Vec<_>>();
+    tracks.sort_by(|left, right| left.0.total_cmp(&right.0));
+    tracks.first().is_some_and(|(_, candidate)| {
+        candidate
+            .name
+            .as_deref()
+            .is_some_and(|name| name.to_ascii_lowercase().starts_with("pause "))
+    })
+}
+
 pub(super) fn target<'a>(
     space: &'a ActionSpace,
     operation_name: &str,
