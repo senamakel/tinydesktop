@@ -5,7 +5,7 @@
 use std::{
     collections::{BTreeMap, VecDeque},
     sync::{Arc, Mutex},
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use super::{
@@ -280,12 +280,13 @@ fn evaluation(value: serde_json::Value) -> tinyjevclient::EvaluationResult {
 
 struct MockEvaluator {
     results: Mutex<VecDeque<tinyjevclient::EvaluationResult>>,
+    requests: Arc<Mutex<Vec<tinyjevclient::EvaluationRequest>>>,
 }
 
 impl Evaluator for MockEvaluator {
     fn evaluate<'a>(
         &'a self,
-        _request: &'a tinyjevclient::EvaluationRequest,
+        request: &'a tinyjevclient::EvaluationRequest,
     ) -> std::pin::Pin<
         Box<
             dyn std::future::Future<
@@ -298,6 +299,10 @@ impl Evaluator for MockEvaluator {
         >,
     > {
         Box::pin(async move {
+            self.requests
+                .lock()
+                .expect("request lock")
+                .push(request.clone());
             Ok(self
                 .results
                 .lock()
@@ -309,17 +314,31 @@ impl Evaluator for MockEvaluator {
 }
 
 fn runtime(results: Vec<tinyjevclient::EvaluationResult>) -> JevRuntime {
-    JevRuntime {
-        client: Arc::new(MockEvaluator {
-            results: Mutex::new(VecDeque::from(results)),
-        }),
-        configuration: tinydesktop_bus::JevConfiguration {
-            provider: tinydesktop_bus::JevProvider::OpenRouter,
-            model: "jev-latest".to_owned(),
-            endpoint_url: None,
+    runtime_recording(results).0
+}
+
+fn runtime_recording(
+    results: Vec<tinyjevclient::EvaluationResult>,
+) -> (
+    JevRuntime,
+    Arc<Mutex<Vec<tinyjevclient::EvaluationRequest>>>,
+) {
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    (
+        JevRuntime {
+            client: Arc::new(MockEvaluator {
+                results: Mutex::new(VecDeque::from(results)),
+                requests: Arc::clone(&requests),
+            }),
+            configuration: tinydesktop_bus::JevConfiguration {
+                provider: tinydesktop_bus::JevProvider::OpenRouter,
+                model: "jev-latest".to_owned(),
+                endpoint_url: None,
+            },
+            pending: Arc::new(Mutex::new(std::collections::HashMap::new())),
         },
-        pending: Arc::new(Mutex::new(std::collections::HashMap::new())),
-    }
+        requests,
+    )
 }
 
 fn backend(screen_count: usize) -> (FakeBackend, Arc<Mutex<Vec<JevOperation>>>) {
@@ -428,11 +447,17 @@ async fn goal_loop_reports_terminal_policy_outcomes() {
 
 #[tokio::test]
 async fn approved_goal_action_reobserves_then_continues_once() {
-    let runtime = runtime(vec![
+    let (runtime, requests) = runtime_recording(vec![
         response_with("CLICK", 0.9, "1", 0.9, 0.9),
         response("DONE", 0.9, "none"),
     ]);
-    let (backend, operations) = backend(3);
+    let (backend, operations) = backend(4);
+    {
+        let mut screens = backend.screens.lock().unwrap();
+        for index in [2, 3] {
+            screens[index].candidates[0].name = Some("Sent First Song by Artist".to_owned());
+        }
+    }
     let request = RunGoalRequest {
         app: "Spotify".to_owned(),
         goal: "send the selected item".to_owned(),
@@ -462,7 +487,14 @@ async fn approved_goal_action_reobserves_then_continues_once() {
         serde_json::from_value(resumed.data.unwrap()).unwrap();
     assert_eq!(resumed.stop, JevStopReason::Done);
     assert_eq!(resumed.turns.len(), 1);
+    assert!(resumed.turns[0].changed);
     assert_eq!(resumed.metrics.calls, 2);
+    assert!(
+        requests.lock().unwrap()[1].state["recent_actions"][0]
+            .as_str()
+            .unwrap()
+            .contains("changed=true")
+    );
     assert_eq!(*operations.lock().unwrap(), vec![JevOperation::Click]);
     let replay = run_goal_with(
         backend,
@@ -542,6 +574,48 @@ async fn declined_and_stale_goal_actions_never_execute() {
     )
     .unwrap();
     assert_eq!(stale.stop, JevStopReason::StaleTarget);
+    assert!(operations.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn expired_confirmation_handle_never_executes() {
+    let runtime = runtime(vec![response_with("CLICK", 0.9, "1", 0.9, 0.9)]);
+    let (backend, operations) = backend(1);
+    let stopped: tinydesktop_bus::JevRunResult = serde_json::from_value(
+        run_goal_with(
+            backend.clone(),
+            runtime.clone(),
+            RunGoalRequest {
+                app: "Spotify".to_owned(),
+                goal: "send the selected item".to_owned(),
+                ..RunGoalRequest::default()
+            },
+        )
+        .await
+        .data
+        .unwrap(),
+    )
+    .unwrap();
+    let id = stopped.confirmation_id.unwrap();
+    runtime
+        .pending
+        .lock()
+        .unwrap()
+        .get_mut(&id)
+        .unwrap()
+        .created = Instant::now()
+        .checked_sub(Duration::from_secs(601))
+        .unwrap();
+    let reply = run_goal_with(
+        backend,
+        runtime,
+        RunGoalRequest {
+            continuation: Some(GoalContinuation { id, approve: true }),
+            ..RunGoalRequest::default()
+        },
+    )
+    .await;
+    assert_eq!(reply.error.unwrap().code, "CONFIRMATION_EXPIRED");
     assert!(operations.lock().unwrap().is_empty());
 }
 

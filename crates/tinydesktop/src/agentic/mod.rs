@@ -49,6 +49,8 @@ struct PendingRun {
     screen: Screen,
     target: Candidate,
     turns: Vec<JevTurn>,
+    history: Vec<String>,
+    unchanged: u32,
     metrics: JevMetrics,
 }
 
@@ -203,13 +205,15 @@ async fn run_goal_with<B: AgentBackend>(
     if let Some(continuation) = request.continuation.clone() {
         return continue_goal(backend, runtime, continuation).await;
     }
-    run_goal_fresh(backend, runtime, request).await
+    run_goal_fresh(backend, runtime, request, Vec::new(), 0).await
 }
 
 async fn run_goal_fresh<B: AgentBackend>(
     backend: B,
     runtime: JevRuntime,
     request: RunGoalRequest,
+    mut history: Vec<String>,
+    mut unchanged: u32,
 ) -> DesktopResponse {
     let max_steps = request.max_steps.clamp(1, 40);
     let max_calls = request.max_model_calls.clamp(1, 80);
@@ -217,9 +221,7 @@ async fn run_goal_fresh<B: AgentBackend>(
     let mut next_text = texts.next();
     let mut root = request.root.clone();
     let mut turns = Vec::new();
-    let mut history = Vec::new();
     let mut metrics = JevMetrics::default();
-    let mut unchanged = 0_u32;
 
     loop {
         if u32::try_from(turns.len()).unwrap_or(u32::MAX) >= max_steps {
@@ -276,6 +278,8 @@ async fn run_goal_fresh<B: AgentBackend>(
                 screen: before,
                 target,
                 turns: turns.clone(),
+                history: history.clone(),
+                unchanged,
                 metrics: metrics.clone(),
             };
             return queue_confirmation(&runtime, pending_run);
@@ -393,25 +397,10 @@ async fn continue_goal<B: AgentBackend>(
     runtime: JevRuntime,
     continuation: GoalContinuation,
 ) -> DesktopResponse {
-    let pending = match runtime.pending.lock() {
-        Ok(mut pending) => pending.remove(&continuation.id),
-        Err(_) => return internal_error("confirmation state is unavailable"),
+    let pending = match take_pending(&runtime, &continuation.id) {
+        Ok(pending) => pending,
+        Err(error) => return *error,
     };
-    let Some(pending) = pending else {
-        return DesktopResponse::err(
-            "run-goal",
-            DesktopError::new(
-                "CONFIRMATION_EXPIRED",
-                "confirmation handle is absent or already consumed",
-            ),
-        );
-    };
-    if pending.created.elapsed() >= Duration::from_secs(600) {
-        return DesktopResponse::err(
-            "run-goal",
-            DesktopError::new("CONFIRMATION_EXPIRED", "confirmation handle expired"),
-        );
-    }
     if !continuation.approve {
         return run_response(
             JevStopReason::Cancelled,
@@ -452,16 +441,37 @@ async fn continue_goal<B: AgentBackend>(
         return action_failed_response(pending.turns, pending.decision, pending.metrics);
     }
     let mut turns = pending.turns;
-    turns.push(JevTurn {
-        step: u32::try_from(turns.len())
-            .unwrap_or(u32::MAX)
-            .saturating_add(1),
-        operation: pending.decision.operation,
-        target: pending.decision.target.clone(),
-        confidence: pending.decision.confidence,
-        ok: true,
-        changed: false,
-    });
+    let mut history = pending.history;
+    let confirmed = JevDecision {
+        executed: true,
+        ..pending.decision.clone()
+    };
+    let after = observe_async(
+        backend.clone(),
+        pending.request.app.clone(),
+        pending.request.root.clone(),
+    )
+    .await;
+    let changed = if let Ok(after) = after {
+        fingerprint(&after) != fingerprint(&fresh)
+    } else {
+        record_turn(&mut turns, &mut history, &confirmed, false);
+        return run_response(
+            JevStopReason::ActionFailed,
+            turns,
+            Some(confirmed),
+            pending.metrics,
+        );
+    };
+    record_turn(&mut turns, &mut history, &confirmed, changed);
+    let unchanged = if changed {
+        0
+    } else {
+        pending.unchanged.saturating_add(1)
+    };
+    if unchanged >= 3 {
+        return run_response(JevStopReason::Stalled, turns, None, pending.metrics);
+    }
     let mut request = pending.request;
     request.continuation = None;
     request.max_steps = request.max_steps.saturating_sub(1);
@@ -475,10 +485,34 @@ async fn continue_goal<B: AgentBackend>(
         return run_response(JevStopReason::ModelBudget, turns, None, pending.metrics);
     }
     merge_continuation(
-        run_goal_fresh(backend, runtime, request).await,
+        run_goal_fresh(backend, runtime, request, history, unchanged).await,
         turns,
         &pending.metrics,
     )
+}
+
+fn take_pending(runtime: &JevRuntime, id: &str) -> Result<PendingRun, Box<DesktopResponse>> {
+    let pending = runtime
+        .pending
+        .lock()
+        .map_err(|_| Box::new(internal_error("confirmation state is unavailable")))?
+        .remove(id)
+        .ok_or_else(|| {
+            Box::new(DesktopResponse::err(
+                "run-goal",
+                DesktopError::new(
+                    "CONFIRMATION_EXPIRED",
+                    "confirmation handle is absent or already consumed",
+                ),
+            ))
+        })?;
+    if pending.created.elapsed() >= Duration::from_secs(600) {
+        return Err(Box::new(DesktopResponse::err(
+            "run-goal",
+            DesktopError::new("CONFIRMATION_EXPIRED", "confirmation handle expired"),
+        )));
+    }
+    Ok(pending)
 }
 
 fn current_target(pending: &PendingRun, fresh: &Screen) -> Option<Candidate> {
