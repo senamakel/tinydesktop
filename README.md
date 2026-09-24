@@ -239,10 +239,11 @@ belongs in a live suite gated behind an environment variable.
 ## Releasing
 
 Run the **Release** workflow from the Actions tab with a `patch`, `minor`, or
-`major` bump. Use `current` only to resume an interrupted release whose version
-commit and tag already exist. The workflow revalidates the workspace, versions
-and tags it — one `[workspace.package]` version that every member inherits —
-builds `crates/tinydesktop` as a TinyBus `cdylib`, and creates a GitHub release.
+`major` bump. It validates the workspace and opens a version pull request for
+the one `[workspace.package]` version every member inherits. Merge that PR
+after required checks pass, then run the workflow with `current` to tag the
+checked version, build `crates/tinydesktop` as a TinyBus `cdylib`, and create
+the GitHub release. Use `current` again to resume an interrupted tagged release.
 Assets follow `tinydesktop-<version>-<platform>.<tar.gz|zip>` and contain the
 native module, its SHA-256 `modules.toml`, license, and
 [`MODULE.md`](MODULE.md). Every release also publishes `checksum.toml`, which
