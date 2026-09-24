@@ -17,14 +17,14 @@ use tinydesktop_bus::{
     ClipboardGetRequest, ClipboardSetRequest, CloseAppRequest, DesktopResponse,
     DismissAllNotificationsRequest, DismissNotificationRequest, DragRequest, FindRequest,
     FocusWindowRequest, GetRequest, HoldKeyRequest, HoldMouseRequest, HoverRequest, IsRequest,
-    LaunchRequest, ListAppsRequest, ListNotificationsRequest, ListSurfacesRequest,
+    JevConfig, LaunchRequest, ListAppsRequest, ListNotificationsRequest, ListSurfacesRequest,
     ListWindowsRequest, MouseClickRequest, MouseMoveRequest, MouseWheelRequest, MoveWindowRequest,
     NotificationActionRequest, PermissionsRequest, PressRequest, RefRequest, ResizeWindowRequest,
-    ScreenshotRequest, ScrollRequest, SelectRequest, SetValueRequest, SnapshotRequest, TypeRequest,
-    WaitRequest, WindowRequest,
+    ResolveIntentRequest, RunGoalRequest, ScreenshotRequest, ScrollRequest, SelectRequest,
+    SetValueRequest, SnapshotRequest, TypeRequest, WaitRequest, WindowRequest,
 };
 
-use crate::{Desktop, Result};
+use crate::{Desktop, Result, agentic};
 
 /// The object served at [`tinydesktop_bus::names::OBJECT_PATH`].
 ///
@@ -34,6 +34,7 @@ use crate::{Desktop, Result};
 #[derive(Debug, Clone)]
 pub(crate) struct DesktopService {
     desktop: Desktop,
+    jev: Option<agentic::JevRuntime>,
 }
 
 impl DesktopService {
@@ -43,9 +44,24 @@ impl DesktopService {
     ///
     /// Propagates whatever [`Desktop::from_config`] rejects.
     pub(crate) fn from_config(config: &serde_json::Value) -> Result<Self> {
-        Ok(Self {
-            desktop: Desktop::from_config(config)?,
-        })
+        let desktop = Desktop::from_config(config)?;
+        let jev = config
+            .as_object()
+            .and_then(|object| object.get("jev"))
+            .map(|value| {
+                let config: JevConfig = serde_json::from_value(value.clone()).map_err(|_| {
+                    crate::Error::ConfigFieldType {
+                        field: "jev",
+                        expected: "a valid Jev configuration object",
+                    }
+                })?;
+                agentic::JevRuntime::configure(&config).map_err(|_| crate::Error::ConfigFieldType {
+                    field: "jev",
+                    expected: "a valid Jev configuration object",
+                })
+            })
+            .transpose()?;
+        Ok(Self { desktop, jev })
     }
 
     /// Runs one engine command on a blocking thread.
@@ -67,6 +83,27 @@ impl DesktopService {
 
 #[tinybus::interface(name = "ai.tinyhumans.tinydesktop.Desktop")]
 impl DesktopService {
+    /// Resolves one natural-language intent against the current screen.
+    #[tinybus(confidential)]
+    async fn resolve_intent(
+        &self,
+        request: ResolveIntentRequest,
+    ) -> TinyBusResult<DesktopResponse> {
+        let Some(runtime) = self.jev_runtime() else {
+            return Ok(jev_not_configured("resolve-intent"));
+        };
+        Ok(agentic::resolve_intent(self.desktop.clone(), runtime, request).await)
+    }
+
+    /// Runs a bounded Jev observe-decide-act loop.
+    #[tinybus(confidential)]
+    async fn run_goal(&self, request: RunGoalRequest) -> TinyBusResult<DesktopResponse> {
+        let Some(runtime) = self.jev_runtime() else {
+            return Ok(jev_not_configured("run-goal"));
+        };
+        Ok(agentic::run_goal(self.desktop.clone(), runtime, request).await)
+    }
+
     /// Walks an accessibility tree and allocates a ref per element.
     async fn snapshot(&self, request: SnapshotRequest) -> TinyBusResult<DesktopResponse> {
         self.run(move |desktop| desktop.snapshot(request)).await
@@ -357,4 +394,20 @@ impl DesktopService {
     async fn permissions(&self, request: PermissionsRequest) -> TinyBusResult<DesktopResponse> {
         self.run(move |desktop| desktop.permissions(request)).await
     }
+}
+
+impl DesktopService {
+    fn jev_runtime(&self) -> Option<agentic::JevRuntime> {
+        self.jev.clone()
+    }
+}
+
+fn jev_not_configured(command: &str) -> DesktopResponse {
+    DesktopResponse::err(
+        command,
+        tinydesktop_bus::DesktopError::new(
+            "JEV_NOT_CONFIGURED",
+            "Jev must be supplied through private module configuration",
+        ),
+    )
 }

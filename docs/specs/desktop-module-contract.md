@@ -18,7 +18,7 @@ engine's argument types, the permission preflight, and the bus surface.
 ### Members
 
 - The interface `ai.tinyhumans.tinydesktop.Desktop` is served at
-  `/ai/tinyhumans/tinydesktop/Desktop` with exactly fifty-four members,
+  `/ai/tinyhumans/tinydesktop/Desktop` with exactly fifty-six members,
   enumerated in dispatch order by `tinydesktop_bus::names::METHODS`.
 - Every member takes at most one request payload and returns a
   `DesktopResponse`. Members taking no argument: `ListDisplays`,
@@ -33,6 +33,24 @@ engine's argument types, the permission preflight, and the bus surface.
 - Session lifecycle, trace read and export, and the engine's bundled skills
   loader are out of contract version 1.0. Adding a member is a minor bump, which
   the bind rule in `tinydesktop_bus::version` permits.
+
+### Jev control
+
+- `ResolveIntent` and `RunGoal` require TinyBus confidential delivery. Jev
+  configuration arrives through sensitive module initialization or
+  reinitialization; the module never returns, logs, or traces its API key.
+- Jev chooses only from module-supplied operations and compatible refs. Text is
+  caller-supplied, ordinary field values are withheld by default, and a
+  destructive result always stops for confirmation. Local label/goal checks
+  also force confirmation for delete, send, purchase, payment, submission,
+  overwrite, unsafe quit, trash, and sign-out actions.
+- Exact endpoint overrides are limited to the selected provider's published
+  route. Accessibility content is labeled as untrusted data, and observation
+  visits at most 4,096 nodes and 64 levels before returning a bounded view.
+- Execution gates on the selected option's probability, not Jev's distribution
+  concentration. Exact accessible names and explicitly requested first/topmost
+  rows may add deterministic identity evidence but never bypass risk checks.
+- Goal runs stop at 40 actions, 80 evaluations, or three unchanged turns.
 
 ### The envelope
 
@@ -72,9 +90,14 @@ engine's argument types, the permission preflight, and the bus surface.
 ### Configuration and concurrency
 
 - The module's configuration is a JSON object with optional `session_id` and
-  `trace_path` strings and `trace_strict` and `headed` booleans. `null` and `{}`
-  yield defaults; an unrecognized field is ignored; a recognized field of the
-  wrong type fails the load.
+  `trace_path` strings, `trace_strict` and `headed` booleans, and a `jev`
+  object containing provider configuration and its API key. `null` and `{}`
+  yield desktop defaults with Jev disabled; invalid recognized fields fail
+  before the served object is replaced.
+- TinyBus sensitive initialization and reinitialization carry the `jev` object.
+  Reinitialization constructs the complete replacement service before
+  `serve_at`, so a rejected key, endpoint, or desktop field leaves the existing
+  service intact.
 - Commands run on a blocking thread pool, not on the connection's dispatch task,
   because a dense snapshot or a thirty-second wait would otherwise stall every
   other caller.
@@ -88,7 +111,7 @@ engine's argument types, the permission preflight, and the bus surface.
 - The served interface is exercised over TinyBus's in-memory transport,
   including a member with a payload, a member without one, a member that fails
   closed, and an unknown member.
-- `examples/verify_module.rs` loads the compiled `cdylib` through the real
+- `crates/tinydesktop-examples/src/bin/verify_module.rs` loads the compiled `cdylib` through the real
   dynamic loader and calls `Version` before a release archive is accepted.
 - The generated dispatch table and the embedded module manifest are both
   asserted against `tinydesktop_bus::names::METHODS`.

@@ -1,0 +1,19 @@
+[package]
+name = "tinydesktop-examples"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Runnable examples and live verification harnesses for tinydesktop."
+publish = false
+
+[dependencies]
+tinydesktop = { path = "../tinydesktop" }
+tinydesktop-bus = { workspace = true }
+tinybus = { workspace = true, features = ["modules"] }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+
+[lints]
+workspace = true

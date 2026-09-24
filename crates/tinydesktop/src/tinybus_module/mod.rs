@@ -53,6 +53,7 @@ tinybus_module::module_export! {
     worker_threads = 2,
     provides = ["ai.tinyhumans.tinydesktop.Desktop"],
     methods = [
+        "ResolveIntent", "RunGoal",
         "Snapshot", "Find", "Get", "Is", "Screenshot",
         "Click", "DoubleClick", "TripleClick", "RightClick", "Type", "SetValue", "Clear",
         "Focus", "Select", "Toggle", "Check", "Uncheck", "Expand", "Collapse", "Scroll",

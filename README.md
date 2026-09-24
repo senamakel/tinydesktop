@@ -4,11 +4,11 @@ Native desktop automation as an installable TinyBus module.
 
 tinydesktop wraps [`agent-desktop`](https://github.com/lahfir/agent-desktop) —
 accessibility-tree observation and interaction for macOS, Windows, and Linux —
-and serves it over TinyBus as fifty-four typed members. A host loads the
+and serves it over TinyBus as fifty-six typed members. A host loads the
 compiled `cdylib`, and an agent behind that host gets structured access to any
 running application: no screenshots to interpret, no pixel matching, no browser.
 
-It is a two-crate cargo workspace. `crates/tinydesktop-bus` is the wire contract
+It is a three-crate cargo workspace. `crates/tinydesktop-bus` is the wire contract
 — member names, request payloads, the response envelope, and the contract
 version, with no transport, no engine, and no behavior — and
 `crates/tinydesktop` is the implementation, built as both an `rlib` and the
@@ -68,6 +68,7 @@ Fifty-four members, listed in dispatch order by `tinydesktop_bus::names::METHODS
 
 | Family | Members |
 | --- | --- |
+| Agentic Jev control | `ResolveIntent` `RunGoal` |
 | Observation | `Snapshot` `Find` `Get` `Is` `Screenshot` |
 | Interaction | `Click` `DoubleClick` `TripleClick` `RightClick` `Type` `SetValue` `Clear` `Focus` `Select` `Toggle` `Check` `Uncheck` `Expand` `Collapse` `Scroll` `ScrollTo` |
 | Input | `Press` `KeyDown` `KeyUp` `Hover` `Drag` `MouseMove` `MouseClick` `MouseDown` `MouseUp` `MouseWheel` |
@@ -85,6 +86,32 @@ naming what to use instead, rather than an `UnknownMethod`.
 
 Session lifecycle, trace read and export, and the engine's bundled skills loader
 are deliberately absent from contract 1.0; see [`ROADMAP.md`](ROADMAP.md).
+
+## Jev-driven control
+
+`ResolveIntent` and `RunGoal` compose the desktop primitives into a native
+observe-decide-act loop. They are confidential-only TinyBus members: ordinary
+calls are rejected, and the bus requires an attested module before delivering
+goals or caller-supplied text.
+
+The Jev provider, endpoint, model, and API key arrive under the module config's
+`jev` field. TinyBus marks module load and reinitialization configuration as
+sensitive host-control traffic, so monitors never receive it and serialized
+ABI buffers are zeroized after use. Reinitialization replaces the served
+`DesktopService` only after the entire new configuration validates.
+
+Jev receives a closed choice of operations and compatible accessibility refs;
+it never generates text or bypasses desktop delivery checks. Existing field
+values are withheld unless the caller opts in. Actions judged hard to undo
+always stop with `confirmation_required`.
+
+The opt-in Spotify verifier reads an exported `OPENROUTER_API_KEY`, passes it
+through private initialization, and never writes or prints it:
+
+```sh
+cargo run -p tinydesktop-examples --bin live_spotify -- \
+  target/live-spotify/libtinydesktop.dylib
+```
 
 ## Permissions and platforms
 
@@ -122,15 +149,14 @@ crates/
     │   ├── error/      # crate-wide `Error` and `Result<T>`
     │   ├── desktop/    # the engine: one method per member, split by family
     │   └── tinybus_module/   # bus interface, setup, and ABI v1 exports
-    ├── tests/
-    │   └── public_api.rs     # integration tests against the public API only
-    └── examples/
-        ├── basic.rs                  # ordinary library API usage
-        ├── verify_module.rs          # local dynamic-module verification
-        └── verify_github_release.rs  # tagged-release download and bus call
+    └── tests/
+        └── public_api.rs     # integration tests against the public API only
+├── tinydesktop-examples/     # runnable examples and live verification bins
+│   └── src/bin/              # basic, loader, release, and Spotify checks
 vendor/
 ├── tinybus/            # pinned TinyBus git submodule (host types, module SDK)
-└── agent-desktop/      # pinned agent-desktop git submodule (the engine)
+├── agent-desktop/      # pinned agent-desktop git submodule (the engine)
+└── tinyjevclient/      # pinned typed Jev/OpenRouter client
 docs/
 ├── README.md           # documentation index and conventions
 ├── specs/              # behavior and architecture specifications
@@ -174,7 +200,7 @@ cargo fmt --all -- --check
 cargo clippy --all-targets --all-features -- -D warnings
 cargo build --all-targets --all-features
 cargo test --all-features
-cargo run -p tinydesktop --example basic
+cargo run -p tinydesktop-examples --bin basic
 cargo build -p tinydesktop --release --lib   # produces the installable cdylib
 ```
 
@@ -187,7 +213,7 @@ cargo install cargo-llvm-cov         # once, before running the coverage gate
 .github/scripts/check-file-coverage.sh 90 coverage.json
 
 # Load the built cdylib through the real TinyBus dynamic loader:
-cargo run -p tinydesktop --example verify_module -- \
+cargo run -p tinydesktop-examples --bin verify_module -- \
   target/release/libtinydesktop.so
 ```
 

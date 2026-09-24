@@ -54,10 +54,10 @@ jobs:
         run: cargo test
 
       # `cargo build --all-targets` only *compiles* an example. `AGENTS.md`
-      # promises `cargo run -p tinydesktop --example basic` works, and a compiled
+      # promises `cargo run -p tinydesktop-examples --bin basic` works, and a compiled
       # example can still fail on its first line.
       - name: Run the bundled example
-        run: cargo run -p tinydesktop --example basic
+        run: cargo run -p tinydesktop-examples --bin basic
 
       # `crates/tinydesktop-bus` exists so a host can name the payload types
       # without compiling the module. That promise is invisible in a diff,
