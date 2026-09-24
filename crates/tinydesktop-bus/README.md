@@ -112,6 +112,11 @@ parses that CLI's stdout needs no second parser.
 
 ## Staying in step with the module
 
+`RunGoal` stops before a consequential action and returns a one-use
+`confirmation_id`. A host resumes through `RunGoalRequest.continuation` with
+that ID and an explicit approval or refusal. The module reobserves the target
+before an approved action; stale or ambiguous targets are refused.
+
 `names::METHODS` lists every member in dispatch order. `crates/tinydesktop`
 asserts both its generated dispatch table and its embedded module manifest
 against that list, so a method added to the interface without an entry here

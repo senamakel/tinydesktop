@@ -1188,6 +1188,7 @@ dependencies = [
  "agent-desktop-linux",
  "agent-desktop-macos",
  "agent-desktop-windows",
+ "getrandom 0.4.3",
  "serde",
  "serde_json",
  "thiserror",

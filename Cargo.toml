@@ -62,6 +62,8 @@ thiserror = "2"
 serde = { version = "1", features = ["derive"] }
 # Positional argument arrays and the module configuration blob.
 serde_json = "1"
+# Unpredictable one-use handles bind host confirmation to a module-held action.
+getrandom = "0.4"
 # Module integration tests exercise the real asynchronous in-memory TinyBus.
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
 

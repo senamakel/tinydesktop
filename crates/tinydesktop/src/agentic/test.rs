@@ -22,8 +22,8 @@ use super::{
 };
 use serde_json::json;
 use tinydesktop_bus::{
-    DesktopResponse, JevConfig, JevDecisionKind, JevOperation, JevProvider, JevStopReason,
-    RunGoalRequest,
+    DesktopResponse, GoalContinuation, JevConfig, JevDecisionKind, JevOperation, JevProvider,
+    JevStopReason, RunGoalRequest,
 };
 use tinyjevclient::{Answer, ChoiceAnswer};
 
@@ -318,6 +318,7 @@ fn runtime(results: Vec<tinyjevclient::EvaluationResult>) -> JevRuntime {
             model: "jev-latest".to_owned(),
             endpoint_url: None,
         },
+        pending: Arc::new(Mutex::new(std::collections::HashMap::new())),
     }
 }
 
@@ -423,6 +424,125 @@ async fn goal_loop_reports_terminal_policy_outcomes() {
     )
     .await;
     assert_eq!(no_target.stop, JevStopReason::LowConfidence);
+}
+
+#[tokio::test]
+async fn approved_goal_action_reobserves_then_continues_once() {
+    let runtime = runtime(vec![
+        response_with("CLICK", 0.9, "1", 0.9, 0.9),
+        response("DONE", 0.9, "none"),
+    ]);
+    let (backend, operations) = backend(3);
+    let request = RunGoalRequest {
+        app: "Spotify".to_owned(),
+        goal: "send the selected item".to_owned(),
+        max_steps: 3,
+        max_model_calls: 3,
+        ..RunGoalRequest::default()
+    };
+    let stopped = run_goal_with(backend.clone(), runtime.clone(), request).await;
+    let stopped: tinydesktop_bus::JevRunResult =
+        serde_json::from_value(stopped.data.unwrap()).unwrap();
+    assert_eq!(stopped.stop, JevStopReason::ConfirmationRequired);
+    assert!(operations.lock().unwrap().is_empty());
+    let id = stopped.confirmation_id.expect("confirmation handle");
+    let resumed = run_goal_with(
+        backend.clone(),
+        runtime.clone(),
+        RunGoalRequest {
+            continuation: Some(GoalContinuation {
+                id: id.clone(),
+                approve: true,
+            }),
+            ..RunGoalRequest::default()
+        },
+    )
+    .await;
+    let resumed: tinydesktop_bus::JevRunResult =
+        serde_json::from_value(resumed.data.unwrap()).unwrap();
+    assert_eq!(resumed.stop, JevStopReason::Done);
+    assert_eq!(resumed.turns.len(), 1);
+    assert_eq!(resumed.metrics.calls, 2);
+    assert_eq!(*operations.lock().unwrap(), vec![JevOperation::Click]);
+    let replay = run_goal_with(
+        backend,
+        runtime,
+        RunGoalRequest {
+            continuation: Some(GoalContinuation { id, approve: true }),
+            ..RunGoalRequest::default()
+        },
+    )
+    .await;
+    assert_eq!(replay.error.unwrap().code, "CONFIRMATION_EXPIRED");
+}
+
+#[tokio::test]
+async fn declined_and_stale_goal_actions_never_execute() {
+    let runtime = runtime(vec![
+        response_with("CLICK", 0.9, "1", 0.9, 0.9),
+        response_with("CLICK", 0.9, "1", 0.9, 0.9),
+    ]);
+    let (backend, operations) = backend(4);
+    let request = RunGoalRequest {
+        app: "Spotify".to_owned(),
+        goal: "send the selected item".to_owned(),
+        ..RunGoalRequest::default()
+    };
+    let declined: tinydesktop_bus::JevRunResult = serde_json::from_value(
+        run_goal_with(backend.clone(), runtime.clone(), request.clone())
+            .await
+            .data
+            .unwrap(),
+    )
+    .unwrap();
+    let decline: tinydesktop_bus::JevRunResult = serde_json::from_value(
+        run_goal_with(
+            backend.clone(),
+            runtime.clone(),
+            RunGoalRequest {
+                continuation: Some(GoalContinuation {
+                    id: declined.confirmation_id.unwrap(),
+                    approve: false,
+                }),
+                ..RunGoalRequest::default()
+            },
+        )
+        .await
+        .data
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(decline.stop, JevStopReason::Cancelled);
+
+    let stopped: tinydesktop_bus::JevRunResult = serde_json::from_value(
+        run_goal_with(backend.clone(), runtime.clone(), request)
+            .await
+            .data
+            .unwrap(),
+    )
+    .unwrap();
+    let mut changed = clickable_screen();
+    changed.candidates[0].name = Some("Different destructive button".to_owned());
+    backend.screens.lock().unwrap().push_front(changed);
+    let stale: tinydesktop_bus::JevRunResult = serde_json::from_value(
+        run_goal_with(
+            backend,
+            runtime,
+            RunGoalRequest {
+                continuation: Some(GoalContinuation {
+                    id: stopped.confirmation_id.unwrap(),
+                    approve: true,
+                }),
+                ..RunGoalRequest::default()
+            },
+        )
+        .await
+        .data
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(stale.stop, JevStopReason::StaleTarget);
+    assert!(operations.lock().unwrap().is_empty());
 }
 
 #[tokio::test]

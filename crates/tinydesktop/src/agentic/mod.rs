@@ -6,13 +6,21 @@ mod screen;
 #[cfg(test)]
 mod test;
 
-use std::{future::Future, pin::Pin, sync::Arc, time::Duration};
+use std::fmt::Write as _;
+use std::{
+    collections::HashMap,
+    future::Future,
+    pin::Pin,
+    sync::{Arc, Mutex},
+    time::{Duration, Instant},
+};
 
 use serde_json::json;
 use tinydesktop_bus::{
-    DesktopError, DesktopResponse, JevConfig, JevConfiguration, JevDecision, JevDecisionKind,
-    JevMetrics, JevOperation, JevProvider, JevRunResult, JevStopReason, JevTarget, JevTurn,
-    RefRequest, ResolveIntentRequest, RunGoalRequest, ScrollRequest, SetValueRequest, WaitRequest,
+    DesktopError, DesktopResponse, GoalContinuation, JevConfig, JevConfiguration, JevDecision,
+    JevDecisionKind, JevMetrics, JevOperation, JevProvider, JevRunResult, JevStopReason, JevTarget,
+    JevTurn, RefRequest, ResolveIntentRequest, RunGoalRequest, ScrollRequest, SetValueRequest,
+    WaitRequest,
 };
 use tinyjevclient::{
     Client, ClientConfig, Error as JevError, EvaluationFailure, EvaluationRequest, EvaluationResult,
@@ -30,6 +38,18 @@ use screen::{Candidate, Screen, fingerprint, observe};
 pub(crate) struct JevRuntime {
     client: Arc<dyn Evaluator>,
     configuration: JevConfiguration,
+    pending: Arc<Mutex<HashMap<String, PendingRun>>>,
+}
+
+#[derive(Debug)]
+struct PendingRun {
+    created: Instant,
+    request: RunGoalRequest,
+    decision: JevDecision,
+    screen: Screen,
+    target: Candidate,
+    turns: Vec<JevTurn>,
+    metrics: JevMetrics,
 }
 
 impl std::fmt::Debug for JevRuntime {
@@ -38,6 +58,7 @@ impl std::fmt::Debug for JevRuntime {
             .debug_struct("JevRuntime")
             .field("client", &"[configured]")
             .field("configuration", &self.configuration)
+            .field("pending", &"[redacted]")
             .finish()
     }
 }
@@ -77,6 +98,7 @@ impl JevRuntime {
                     .unwrap_or_else(|| "jev-latest".to_owned()),
                 endpoint_url: request.endpoint_url.clone(),
             },
+            pending: Arc::new(Mutex::new(HashMap::new())),
         })
     }
 }
@@ -173,11 +195,22 @@ async fn run_goal_with<B: AgentBackend>(
     runtime: JevRuntime,
     request: RunGoalRequest,
 ) -> DesktopResponse {
+    if let Some(continuation) = request.continuation.clone() {
+        return continue_goal(backend, runtime, continuation).await;
+    }
+    run_goal_fresh(backend, runtime, request).await
+}
+
+async fn run_goal_fresh<B: AgentBackend>(
+    backend: B,
+    runtime: JevRuntime,
+    request: RunGoalRequest,
+) -> DesktopResponse {
     let max_steps = request.max_steps.clamp(1, 40);
     let max_calls = request.max_model_calls.clamp(1, 80);
-    let mut texts = request.text.into_iter();
+    let mut texts = request.text.clone().into_iter();
     let mut next_text = texts.next();
-    let mut root = request.root;
+    let mut root = request.root.clone();
     let mut turns = Vec::new();
     let mut history = Vec::new();
     let mut metrics = JevMetrics::default();
@@ -219,6 +252,29 @@ async fn run_goal_with<B: AgentBackend>(
             return action_failed_response(turns, decision, metrics);
         }
         let stop = stop_reason(decision.decision);
+        if stop == Some(JevStopReason::ConfirmationRequired) {
+            let Some(target) = selected_target(&before, &decision) else {
+                return run_response(JevStopReason::StaleTarget, turns, Some(decision), metrics);
+            };
+            let remaining_text = next_text.into_iter().chain(texts).collect();
+            let pending_run = PendingRun {
+                created: Instant::now(),
+                request: RunGoalRequest {
+                    text: remaining_text,
+                    root,
+                    max_steps: max_steps
+                        .saturating_sub(u32::try_from(turns.len()).unwrap_or(u32::MAX)),
+                    max_model_calls: max_calls.saturating_sub(metrics.calls),
+                    ..request.clone()
+                },
+                decision: decision.clone(),
+                screen: before,
+                target,
+                turns: turns.clone(),
+                metrics: metrics.clone(),
+            };
+            return queue_confirmation(&runtime, pending_run);
+        }
         if let Some(stop) = stop {
             return run_response(stop, turns, Some(decision), metrics);
         }
@@ -244,30 +300,265 @@ async fn run_goal_with<B: AgentBackend>(
         } else {
             unchanged.saturating_add(1)
         };
-        let turn = JevTurn {
-            step: u32::try_from(turns.len())
-                .unwrap_or(u32::MAX)
-                .saturating_add(1),
-            operation: decision.operation,
-            target: decision.target.clone(),
-            confidence: decision.confidence,
-            ok: decision.executed,
-            changed,
-        };
-        history.push(format!(
-            "step {}: {:?} {} and changed={changed}",
-            turn.step,
-            turn.operation,
-            turn.target
-                .as_ref()
-                .and_then(|target| target.name.as_deref())
-                .unwrap_or("the selected element")
-        ));
-        turns.push(turn);
+        record_turn(&mut turns, &mut history, &decision, changed);
         if unchanged >= 3 {
             return run_response(JevStopReason::Stalled, turns, None, metrics);
         }
     }
+}
+
+fn selected_target(screen: &Screen, decision: &JevDecision) -> Option<Candidate> {
+    decision
+        .target
+        .as_ref()
+        .and_then(|target| {
+            screen
+                .candidates
+                .iter()
+                .find(|candidate| candidate.ref_id == target.ref_id)
+        })
+        .cloned()
+}
+
+fn queue_confirmation(runtime: &JevRuntime, run: PendingRun) -> DesktopResponse {
+    let mut token = [0_u8; 16];
+    if getrandom::fill(&mut token).is_err() {
+        return internal_error("cannot create a confirmation handle");
+    }
+    let id = token
+        .iter()
+        .fold(String::with_capacity(32), |mut id, byte| {
+            let _ = write!(id, "{byte:02x}");
+            id
+        });
+    let Ok(mut pending) = runtime.pending.lock() else {
+        return internal_error("confirmation state is unavailable");
+    };
+    pending.retain(|_, previous| previous.created.elapsed() < Duration::from_secs(600));
+    if pending.len() >= 32 {
+        return DesktopResponse::err(
+            "run-goal",
+            DesktopError::new(
+                "CONFIRMATION_LIMIT",
+                "too many desktop actions await confirmation",
+            ),
+        );
+    }
+    let response = run_response_with_id(
+        JevStopReason::ConfirmationRequired,
+        run.turns.clone(),
+        Some(run.decision.clone()),
+        run.metrics.clone(),
+        Some(id.clone()),
+    );
+    pending.insert(id, run);
+    response
+}
+
+fn record_turn(
+    turns: &mut Vec<JevTurn>,
+    history: &mut Vec<String>,
+    decision: &JevDecision,
+    changed: bool,
+) {
+    let turn = JevTurn {
+        step: u32::try_from(turns.len())
+            .unwrap_or(u32::MAX)
+            .saturating_add(1),
+        operation: decision.operation,
+        target: decision.target.clone(),
+        confidence: decision.confidence,
+        ok: decision.executed,
+        changed,
+    };
+    history.push(format!(
+        "step {}: {:?} {} and changed={changed}",
+        turn.step,
+        turn.operation,
+        turn.target
+            .as_ref()
+            .and_then(|target| target.name.as_deref())
+            .unwrap_or("the selected element")
+    ));
+    turns.push(turn);
+}
+
+async fn continue_goal<B: AgentBackend>(
+    backend: B,
+    runtime: JevRuntime,
+    continuation: GoalContinuation,
+) -> DesktopResponse {
+    let pending = match runtime.pending.lock() {
+        Ok(mut pending) => pending.remove(&continuation.id),
+        Err(_) => return internal_error("confirmation state is unavailable"),
+    };
+    let Some(pending) = pending else {
+        return DesktopResponse::err(
+            "run-goal",
+            DesktopError::new(
+                "CONFIRMATION_EXPIRED",
+                "confirmation handle is absent or already consumed",
+            ),
+        );
+    };
+    if pending.created.elapsed() >= Duration::from_secs(600) {
+        return DesktopResponse::err(
+            "run-goal",
+            DesktopError::new("CONFIRMATION_EXPIRED", "confirmation handle expired"),
+        );
+    }
+    if !continuation.approve {
+        return run_response(
+            JevStopReason::Cancelled,
+            pending.turns,
+            Some(pending.decision),
+            pending.metrics,
+        );
+    }
+    let fresh = match observe_async(
+        backend.clone(),
+        pending.request.app.clone(),
+        pending.request.root.clone(),
+    )
+    .await
+    {
+        Ok(screen) => screen,
+        Err(error) => return *error,
+    };
+    let Some(target) = current_target(&pending, &fresh) else {
+        return run_response(
+            JevStopReason::StaleTarget,
+            pending.turns,
+            Some(pending.decision),
+            pending.metrics,
+        );
+    };
+    let text = (pending.decision.operation == JevOperation::TypeText)
+        .then(|| pending.request.text.first().cloned())
+        .flatten();
+    let reply = execute_operation(
+        backend.clone(),
+        pending.decision.operation,
+        Some(target),
+        text,
+    )
+    .await;
+    if !reply.ok {
+        return action_failed_response(pending.turns, pending.decision, pending.metrics);
+    }
+    let mut turns = pending.turns;
+    turns.push(JevTurn {
+        step: u32::try_from(turns.len())
+            .unwrap_or(u32::MAX)
+            .saturating_add(1),
+        operation: pending.decision.operation,
+        target: pending.decision.target.clone(),
+        confidence: pending.decision.confidence,
+        ok: true,
+        changed: false,
+    });
+    let mut request = pending.request;
+    request.continuation = None;
+    request.max_steps = request.max_steps.saturating_sub(1);
+    if pending.decision.operation == JevOperation::TypeText && !request.text.is_empty() {
+        request.text.remove(0);
+    }
+    if request.max_steps == 0 {
+        return run_response(JevStopReason::ActionBudget, turns, None, pending.metrics);
+    }
+    if request.max_model_calls == 0 {
+        return run_response(JevStopReason::ModelBudget, turns, None, pending.metrics);
+    }
+    merge_continuation(
+        run_goal_fresh(backend, runtime, request).await,
+        turns,
+        &pending.metrics,
+    )
+}
+
+fn current_target(pending: &PendingRun, fresh: &Screen) -> Option<Candidate> {
+    let mut matching = fresh.candidates.iter().filter(|candidate| {
+        same_target(
+            &pending.screen,
+            fresh,
+            &pending.target,
+            candidate,
+            pending.decision.operation,
+        )
+    });
+    let target = matching.next()?;
+    matching.next().is_none().then(|| target.clone())
+}
+
+fn merge_continuation(
+    mut result: DesktopResponse,
+    mut turns: Vec<JevTurn>,
+    metrics: &JevMetrics,
+) -> DesktopResponse {
+    if let Some(data) = result.data.take() {
+        if let Ok(mut continuation_result) = serde_json::from_value::<JevRunResult>(data.clone()) {
+            turns.append(&mut continuation_result.turns);
+            for (index, turn) in turns.iter_mut().enumerate() {
+                turn.step = u32::try_from(index).unwrap_or(u32::MAX).saturating_add(1);
+            }
+            continuation_result.turns = turns;
+            continuation_result.metrics.calls = continuation_result
+                .metrics
+                .calls
+                .saturating_add(metrics.calls);
+            continuation_result.metrics.attempts = continuation_result
+                .metrics
+                .attempts
+                .saturating_add(metrics.attempts);
+            continuation_result.metrics.latency_ms = continuation_result
+                .metrics
+                .latency_ms
+                .saturating_add(metrics.latency_ms);
+            continuation_result.metrics.input_tokens = continuation_result
+                .metrics
+                .input_tokens
+                .saturating_add(metrics.input_tokens);
+            continuation_result.metrics.output_tokens = continuation_result
+                .metrics
+                .output_tokens
+                .saturating_add(metrics.output_tokens);
+            result.data = serde_json::to_value(continuation_result).ok();
+        } else {
+            result.data = Some(data);
+        }
+    }
+    result
+}
+
+fn same_target(
+    before: &Screen,
+    after: &Screen,
+    old: &Candidate,
+    current: &Candidate,
+    operation: JevOperation,
+) -> bool {
+    let action = match operation {
+        JevOperation::Click => "Click",
+        JevOperation::TypeText => "SetValue",
+        JevOperation::Check | JevOperation::Uncheck => "Toggle",
+        JevOperation::Expand => "Expand",
+        JevOperation::Collapse => "Collapse",
+        JevOperation::Scroll => "Scroll",
+        _ => return false,
+    };
+    before.app == after.app
+        && before.window == after.window
+        && before.surface == after.surface
+        && old.role == current.role
+        && old.name == current.name
+        && old.description == current.description
+        && old.path == current.path
+        && old.bounds == current.bounds
+        && old.states == current.states
+        && (old.name.is_some() || old.description.is_some() || old.bounds.is_some())
+        && current.available_actions.iter().any(|available| {
+            available == action || (operation == JevOperation::TypeText && available == "TypeText")
+        })
 }
 
 fn stop_reason(decision: JevDecisionKind) -> Option<JevStopReason> {
@@ -309,12 +600,23 @@ fn run_response(
     pending: Option<JevDecision>,
     metrics: JevMetrics,
 ) -> DesktopResponse {
+    run_response_with_id(stop, turns, pending, metrics, None)
+}
+
+fn run_response_with_id(
+    stop: JevStopReason,
+    turns: Vec<JevTurn>,
+    pending: Option<JevDecision>,
+    metrics: JevMetrics,
+    confirmation_id: Option<String>,
+) -> DesktopResponse {
     response(
         "run-goal",
         &JevRunResult {
             stop,
             turns,
             pending,
+            confirmation_id,
             metrics,
         },
     )
