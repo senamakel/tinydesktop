@@ -5,7 +5,7 @@ v1. Install only the archive matching the host operating system and
 architecture.
 
 The module claims `ai.tinyhumans.tinydesktop.Desktop`, serves the object at
-`/ai/tinyhumans/tinydesktop/Desktop`, and provides fifty-four members covering
+`/ai/tinyhumans/tinydesktop/Desktop`, and provides fifty-six members covering
 accessibility-tree observation, ref-addressed interaction, synthesized keyboard
 and mouse input, application and window management, the pasteboard,
 notifications, waits, and status. Every member takes one request payload — or

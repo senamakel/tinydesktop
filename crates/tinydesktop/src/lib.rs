@@ -2,7 +2,7 @@
 //!
 //! tinydesktop wraps the [`agent-desktop`] engine — accessibility-tree
 //! observation and interaction for macOS, Windows, and Linux — and serves it
-//! over `TinyBus` as fifty-four typed members. A host loads the compiled
+//! over `TinyBus` as fifty-six typed members. A host loads the compiled
 //! `cdylib`, and an agent behind that host gets structured access to any
 //! running application: no screenshots to interpret, no pixel matching, no
 //! browser.
@@ -11,7 +11,7 @@
 //!
 //! # Layout
 //!
-//! This is the implementation half of a two-crate workspace:
+//! This is the implementation crate in a three-crate workspace:
 //!
 //! - [`tinydesktop_bus`] — the wire contract. Member names, request payloads,
 //!   the response envelope, and the contract version, with no transport, no
@@ -91,6 +91,7 @@
 //! `PLATFORM_NOT_SUPPORTED` and lists the surfaces it does support, which is
 //! none. That is inherited from the vendored engine and will follow it.
 
+mod agentic;
 mod desktop;
 mod error;
 mod tinybus_module;
@@ -109,11 +110,13 @@ pub use tinydesktop_bus::{
     DeliveryDisposition, DesktopError, DesktopResponse, Direction, DismissAllNotificationsRequest,
     DismissNotificationRequest, DragEndpoint, DragRequest, ENVELOPE_VERSION, ElementProperty,
     ElementStateProperty, FindRequest, FocusWindowRequest, GetRequest, HoldKeyRequest,
-    HoldMouseRequest, HoverRequest, INTERFACE, IsRequest, LaunchRequest, ListAppsRequest,
-    ListNotificationsRequest, ListSurfacesRequest, ListWindowsRequest, METHODS, Modifier,
-    MouseButton, MouseClickRequest, MouseMoveRequest, MouseWheelRequest, MoveWindowRequest,
-    NotificationActionRequest, OBJECT_PATH, PermissionsRequest, PressRequest, RecoveryHint,
-    RefRequest, ResizeWindowRequest, RetryDisposition, ScreenshotRequest, ScrollRequest,
+    HoldMouseRequest, HoverRequest, INTERFACE, IsRequest, JevConfig, JevConfiguration, JevDecision,
+    JevDecisionKind, JevMetrics, JevOperation, JevProvider, JevRunResult, JevStopReason, JevTarget,
+    JevTurn, LaunchRequest, ListAppsRequest, ListNotificationsRequest, ListSurfacesRequest,
+    ListWindowsRequest, METHODS, Modifier, MouseButton, MouseClickRequest, MouseMoveRequest,
+    MouseWheelRequest, MoveWindowRequest, NotificationActionRequest, OBJECT_PATH,
+    PermissionsRequest, PressRequest, RecoveryHint, RefRequest, ResizeWindowRequest,
+    ResolveIntentRequest, RetryDisposition, RunGoalRequest, ScreenshotRequest, ScrollRequest,
     SelectRequest, SetValueRequest, SnapshotRequest, StatePredicate, Surface, TypeRequest,
     WaitRequest, WindowRequest, is_compatible, names, version,
 };

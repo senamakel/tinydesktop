@@ -18,6 +18,6 @@ Linked specification: [`../specs/desktop-module-contract.md`](../specs/desktop-m
    dispatch table and the embedded manifest against that list.
 6. Exercise the interface over the in-memory bus, then load the compiled
    `cdylib` through the real dynamic loader with
-   `cargo run -p tinydesktop --example verify_module`.
+   `cargo run -p tinydesktop-examples --bin verify_module`.
 7. Run the four validation commands and the coverage gate, and update
    `README.md`, `MODULE.md`, and `ROADMAP.md` in the same change.

@@ -62,7 +62,7 @@ docs/
 └── adr/                # immutable architecture decision records
 ```
 
-### The two-crate split
+### The crate split
 
 `crates/tinydesktop-bus` holds every type that crosses the bus and the names of
 the members that carry them. It has no transport, no runtime, no engine, and no
@@ -143,8 +143,8 @@ Supporting commands:
 - `cargo fmt --all` — format before committing.
 - `cargo test <filter>` — run a focused subset while iterating.
 - `cargo test -p tinydesktop-bus` — run one crate's suite.
-- `cargo run -p tinydesktop --example basic` — run the bundled example.
-- `cargo run -p tinydesktop --example verify_module -- <path>` — load a built
+- `cargo run -p tinydesktop-examples --bin basic` — run the bundled example.
+- `cargo run -p tinydesktop-examples --bin verify_module -- <path>` — load a built
   `cdylib` through the real TinyBus dynamic loader.
 - `cargo doc --no-deps --all-features` — build the rustdoc CI also builds with
   `RUSTDOCFLAGS="-D warnings"`.

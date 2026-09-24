@@ -13,7 +13,7 @@ use tinybus::Connection;
 use tinybus::broker::Broker;
 use tinybus::module::ModuleHost;
 use tinybus::transport::memory::MemoryBus;
-use tinydesktop::{DesktopResponse, METHODS, names};
+use tinydesktop_bus::{DesktopResponse, METHODS, names};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -24,11 +24,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let module_host = ModuleHost::new(broker);
     let info = module_host.load_file(&module)?;
 
-    if info.name != env!("CARGO_PKG_NAME") {
+    if info.name != "tinydesktop" {
         return Err(io::Error::other(format!(
             "loaded module `{}` instead of `{}`",
-            info.name,
-            env!("CARGO_PKG_NAME")
+            info.name, "tinydesktop"
         ))
         .into());
     }

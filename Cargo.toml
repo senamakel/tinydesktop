@@ -31,6 +31,9 @@ repository = "https://github.com/tinyhumansai/tinydesktop"
 # release, and a pinned requirement here would stop resolving the moment it did.
 # Nothing in this workspace is published, so the path is the whole address.
 tinydesktop-bus = { path = "crates/tinydesktop-bus" }
+# Native typed Jev transport used by the desktop-control policy. Vendored as a
+# pinned submodule so provider validation and retry behavior are reproducible.
+tinyjevclient = { path = "vendor/tinyjevclient/crates/tinyjevclient" }
 # The desktop automation engine this module wraps: accessibility-tree
 # observation, ref allocation, and the command implementations behind every
 # member of the bus interface. Vendored as the `vendor/agent-desktop` submodule
