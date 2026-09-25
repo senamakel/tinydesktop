@@ -32,7 +32,7 @@ fn actionability_and_child_count_change_fingerprint() {
 fn large_accessibility_fields_produce_fixed_size_fingerprint() {
     let node = Candidate {
         role: "text".to_owned(),
-        name: Some("é".repeat(100_000)),
+        name: Some(format!("a{}", "é".repeat(100_000))),
         path: vec!["ancestor".repeat(100_000); 100],
         value: Some(json!({"text": "v".repeat(100_000)})),
         ..Candidate::default()

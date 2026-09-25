@@ -306,7 +306,10 @@ pub(super) fn fingerprint(screen: &Screen) -> String {
 
 fn hash_text(text: &str, hash: &mut impl Hasher) {
     text.len().hash(hash);
-    let end = text.floor_char_boundary(text.len().min(MAX_FINGERPRINT_BYTES));
+    let mut end = text.len().min(MAX_FINGERPRINT_BYTES);
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
     text[..end].hash(hash);
 }
 
