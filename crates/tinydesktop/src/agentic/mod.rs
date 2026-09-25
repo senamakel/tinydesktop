@@ -345,7 +345,7 @@ async fn continue_goal<B: AgentBackend>(
     }
     let fresh = match execute_pending_action(&backend, &pending).await {
         Ok(screen) => screen,
-        Err(reply) => return reply,
+        Err(reply) => return *reply,
     };
     let mut turns = pending.turns.clone();
     let mut history = pending.history.clone();
@@ -432,9 +432,9 @@ fn pending_stop(pending: &PendingRun, stop: JevStopReason) -> DesktopResponse {
 async fn execute_pending_action<B: AgentBackend>(
     backend: &B,
     pending: &PendingRun,
-) -> Result<Screen, DesktopResponse> {
+) -> Result<Screen, Box<DesktopResponse>> {
     let remaining = remaining_goal_time(pending)
-        .ok_or_else(|| pending_stop(pending, JevStopReason::TimeBudget))?;
+        .ok_or_else(|| Box::new(pending_stop(pending, JevStopReason::TimeBudget)))?;
     let fresh = match tokio::time::timeout(
         remaining,
         observe_async(
@@ -446,11 +446,11 @@ async fn execute_pending_action<B: AgentBackend>(
     .await
     {
         Ok(Ok(screen)) => screen,
-        Ok(Err(error)) => return Err(*error),
-        Err(_) => return Err(pending_stop(pending, JevStopReason::TimeBudget)),
+        Ok(Err(error)) => return Err(error),
+        Err(_) => return Err(Box::new(pending_stop(pending, JevStopReason::TimeBudget))),
     };
     let target = current_target(pending, &fresh)
-        .ok_or_else(|| pending_stop(pending, JevStopReason::StaleTarget))?;
+        .ok_or_else(|| Box::new(pending_stop(pending, JevStopReason::StaleTarget)))?;
     let text = (pending.decision.operation == JevOperation::TypeText)
         .then(|| {
             prepared_text(&pending.request, &target)
@@ -458,10 +458,10 @@ async fn execute_pending_action<B: AgentBackend>(
         })
         .flatten();
     if pending.decision.operation == JevOperation::TypeText && text.is_none() {
-        return Err(pending_stop(pending, JevStopReason::NeedsText));
+        return Err(Box::new(pending_stop(pending, JevStopReason::NeedsText)));
     }
     let remaining = remaining_goal_time(pending)
-        .ok_or_else(|| pending_stop(pending, JevStopReason::TimeBudget))?;
+        .ok_or_else(|| Box::new(pending_stop(pending, JevStopReason::TimeBudget)))?;
     let reply = tokio::time::timeout(
         remaining,
         execute_operation(
@@ -475,20 +475,20 @@ async fn execute_pending_action<B: AgentBackend>(
     let Ok(reply) = reply else {
         let mut turns = pending.turns.clone();
         turns.push(failed_turn(&turns, &pending.decision));
-        return Err(run_response(
+        return Err(Box::new(run_response(
             JevStopReason::ActionUncertain,
             turns,
             Some(pending.decision.clone()),
             pending.metrics.clone(),
-        ));
+        )));
     };
     if !reply.ok {
-        return Err(action_failed_response(
+        return Err(Box::new(action_failed_response(
             pending.turns.clone(),
             pending.decision.clone(),
             pending.metrics.clone(),
             &reply,
-        ));
+        )));
     }
     Ok(fresh)
 }

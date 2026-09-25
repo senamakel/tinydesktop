@@ -135,7 +135,7 @@ impl<B: AgentBackend> GoalLoop<B> {
         }
     }
 
-    async fn observe(&self) -> Result<Screen, DesktopResponse> {
+    async fn observe(&self) -> Result<Screen, Box<DesktopResponse>> {
         match tokio::time::timeout(
             self.max_elapsed.saturating_sub(self.started.elapsed()),
             observe_async(
@@ -147,8 +147,8 @@ impl<B: AgentBackend> GoalLoop<B> {
         .await
         {
             Ok(Ok(screen)) => Ok(screen),
-            Ok(Err(error)) => Err(*error),
-            Err(_) => Err(self.stop(JevStopReason::TimeBudget, None)),
+            Ok(Err(error)) => Err(error),
+            Err(_) => Err(Box::new(self.stop(JevStopReason::TimeBudget, None))),
         }
     }
 
@@ -158,7 +158,7 @@ impl<B: AgentBackend> GoalLoop<B> {
         }
         let before = match self.observe().await {
             Ok(screen) => screen,
-            Err(reply) => return Some(reply),
+            Err(reply) => return Some(*reply),
         };
         if !within_scope(&self.request, &before) {
             return Some(self.stop(JevStopReason::ScopeChanged, None));
@@ -173,7 +173,7 @@ impl<B: AgentBackend> GoalLoop<B> {
         }
         let decision = match self.decide(&before).await {
             Ok(decision) => decision,
-            Err(reply) => return Some(reply),
+            Err(reply) => return Some(*reply),
         };
         match self.handle_decision(&before, &decision) {
             DecisionFlow::Stop(reply) => Some(*reply),
@@ -182,7 +182,7 @@ impl<B: AgentBackend> GoalLoop<B> {
         }
     }
 
-    async fn decide(&mut self, before: &Screen) -> Result<JevDecision, DesktopResponse> {
+    async fn decide(&mut self, before: &Screen) -> Result<JevDecision, Box<DesktopResponse>> {
         let text = self
             .next_text
             .as_deref()
@@ -205,19 +205,19 @@ impl<B: AgentBackend> GoalLoop<B> {
         .await;
         let outcome = match outcome {
             Ok(Ok(outcome)) => outcome,
-            Ok(Err(error)) => return Err(*error),
-            Err(_) => return Err(self.stop(JevStopReason::TimeBudget, None)),
+            Ok(Err(error)) => return Err(error),
+            Err(_) => return Err(Box::new(self.stop(JevStopReason::TimeBudget, None))),
         };
         for evaluation in &outcome.evaluations {
             merge_metrics(&mut self.metrics, evaluation);
         }
         if let Some(failure) = outcome.action_failure {
-            return Err(action_failed_response(
+            return Err(Box::new(action_failed_response(
                 self.turns.clone(),
                 outcome.decision,
                 self.metrics.clone(),
                 &failure,
-            ));
+            )));
         }
         Ok(outcome.decision)
     }
@@ -293,7 +293,7 @@ impl<B: AgentBackend> GoalLoop<B> {
     ) -> Option<DesktopResponse> {
         let fresh = match self.observe().await {
             Ok(screen) => screen,
-            Err(reply) => return Some(reply),
+            Err(reply) => return Some(*reply),
         };
         let target = match self.current_target(before, &fresh, &decision) {
             Ok(target) => target,
