@@ -35,6 +35,7 @@ pub(super) struct Screen {
     pub(super) surface: String,
     pub(super) root: Option<String>,
     pub(super) candidates: Vec<Candidate>,
+    pub(super) observed: Vec<Candidate>,
 }
 
 pub(super) fn observe(
@@ -45,7 +46,7 @@ pub(super) fn observe(
     let request = SnapshotRequest {
         app: Some(app.to_owned()),
         include_bounds: true,
-        interactive_only: true,
+        interactive_only: false,
         compact: true,
         root_ref: root.map(str::to_owned),
         ..SnapshotRequest::default()
@@ -106,6 +107,7 @@ pub(super) fn parse_reply(
     let mut candidates = Vec::new();
     let mut visited = 0_usize;
     collect(&mut root_node, &[], &mut candidates, 0, &mut visited);
+    let observed = candidates.clone();
     candidates.retain(offerable);
     candidates.truncate(254);
 
@@ -123,6 +125,7 @@ pub(super) fn parse_reply(
         surface,
         root: root.map(str::to_owned),
         candidates,
+        observed,
     })
 }
 
@@ -238,7 +241,7 @@ pub(super) fn fingerprint(screen: &Screen) -> String {
                 node.ref_id,
                 node.role,
                 node.name.as_deref().unwrap_or_default(),
-                node.states
+                (node.states.as_slice(), node.value.as_ref())
             )
         })
         .collect::<Vec<_>>()

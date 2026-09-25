@@ -4,7 +4,7 @@
 
 use super::{
     GoalContinuation, JevConfig, JevDecisionKind, JevOperation, JevProvider, JevStopReason,
-    ResolveIntentRequest, RunGoalRequest,
+    ResolveIntentRequest, RunGoalRequest, VisiblePredicate,
 };
 use serde_json::json;
 
@@ -100,5 +100,37 @@ fn confirmation_payload_has_explicit_approval_and_one_use_handle() {
     assert_eq!(
         serde_json::to_value(JevStopReason::StaleTarget).unwrap(),
         json!("stale_target")
+    );
+}
+
+#[test]
+fn scoped_goal_additions_are_backward_compatible_and_have_stable_wire_names() {
+    let old: RunGoalRequest =
+        serde_json::from_value(json!({"app":"TextEdit","goal":"type"})).unwrap();
+    assert!(old.require_confirmations);
+    assert!(old.success.is_empty());
+    assert_eq!(old.max_elapsed_ms, 120_000);
+    let scoped: RunGoalRequest = serde_json::from_value(json!({
+        "app":"TextEdit", "goal":"type", "window":"Untitled",
+        "allowed_operations":["TYPE_TEXT"],
+        "allowed_targets":["Document"],
+        "text_slots":{"Document":"marker"},
+        "success":[{"kind":"value_contains","name":"Document","value":"marker"}],
+        "max_elapsed_ms":30000,
+        "require_confirmations":false
+    }))
+    .unwrap();
+    assert_eq!(scoped.allowed_operations, vec![JevOperation::TypeText]);
+    assert_eq!(
+        scoped.success,
+        vec![VisiblePredicate::ValueContains {
+            name: "Document".into(),
+            value: "marker".into()
+        }]
+    );
+    assert!(!scoped.require_confirmations);
+    assert_eq!(
+        serde_json::to_value(&scoped).unwrap()["success"][0]["kind"],
+        json!("value_contains")
     );
 }

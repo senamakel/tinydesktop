@@ -2,6 +2,8 @@
 
 mod policy;
 mod screen;
+mod task;
+mod verify;
 
 #[cfg(test)]
 mod test;
@@ -17,10 +19,10 @@ use std::{
 
 use serde_json::json;
 use tinydesktop_bus::{
-    DesktopError, DesktopResponse, GoalContinuation, JevConfig, JevConfiguration, JevDecision,
-    JevDecisionKind, JevMetrics, JevOperation, JevProvider, JevRunResult, JevStopReason, JevTarget,
-    JevTurn, RefRequest, ResolveIntentRequest, RunGoalRequest, ScrollRequest, SetValueRequest,
-    WaitRequest,
+    DeliveryDisposition, DesktopError, DesktopResponse, GoalContinuation, JevConfig,
+    JevConfiguration, JevDecision, JevDecisionKind, JevMetrics, JevObservation, JevOperation,
+    JevProvider, JevRunResult, JevStopReason, JevTarget, JevTurn, RefRequest, ResolveIntentRequest,
+    RunGoalRequest, ScrollRequest, SetValueRequest, WaitRequest,
 };
 use tinyjevclient::{
     Client, ClientConfig, Error as JevError, EvaluationFailure, EvaluationRequest, EvaluationResult,
@@ -32,6 +34,8 @@ use policy::{
     parse_operation, playing_goal_satisfied, positional_match, shortlist, target,
 };
 use screen::{Candidate, Screen, fingerprint, observe};
+use task::run_goal_fresh;
+use verify::{exact_label, satisfied, verify};
 
 /// Configured Jev transport and non-secret policy metadata.
 #[derive(Clone)]
@@ -208,114 +212,6 @@ async fn run_goal_with<B: AgentBackend>(
     run_goal_fresh(backend, runtime, request, Vec::new(), 0).await
 }
 
-async fn run_goal_fresh<B: AgentBackend>(
-    backend: B,
-    runtime: JevRuntime,
-    request: RunGoalRequest,
-    mut history: Vec<String>,
-    mut unchanged: u32,
-) -> DesktopResponse {
-    let max_steps = request.max_steps.clamp(1, 40);
-    let max_calls = request.max_model_calls.clamp(1, 80);
-    let mut texts = request.text.clone().into_iter();
-    let mut next_text = texts.next();
-    let mut root = request.root.clone();
-    let mut turns = Vec::new();
-    let mut metrics = JevMetrics::default();
-
-    loop {
-        if u32::try_from(turns.len()).unwrap_or(u32::MAX) >= max_steps {
-            return run_response(JevStopReason::ActionBudget, turns, None, metrics);
-        }
-        if metrics.calls >= max_calls {
-            return run_response(JevStopReason::ModelBudget, turns, None, metrics);
-        }
-        let before = match observe_async(backend.clone(), request.app.clone(), root.clone()).await {
-            Ok(screen) => screen,
-            Err(error) => return *error,
-        };
-        let before_fingerprint = fingerprint(&before);
-        let outcome = resolve_on_screen(
-            &backend,
-            &runtime,
-            &request.goal,
-            &before,
-            next_text.as_deref(),
-            request.include_values,
-            true,
-            &history,
-            metrics.calls.saturating_add(1) < max_calls,
-        )
-        .await;
-        let outcome = match outcome {
-            Ok(outcome) => outcome,
-            Err(error) => return *error,
-        };
-        for evaluation in &outcome.evaluations {
-            merge_metrics(&mut metrics, evaluation);
-        }
-        let decision = outcome.decision;
-        if let Some(_failure) = outcome.action_failure {
-            return action_failed_response(turns, decision, metrics);
-        }
-        let stop = stop_reason(decision.decision);
-        if stop == Some(JevStopReason::ConfirmationRequired) {
-            let Some(target) = selected_target(&before, &decision) else {
-                return run_response(JevStopReason::StaleTarget, turns, Some(decision), metrics);
-            };
-            let remaining_text = next_text.into_iter().chain(texts).collect();
-            let pending_run = PendingRun {
-                created: Instant::now(),
-                request: RunGoalRequest {
-                    text: remaining_text,
-                    root,
-                    max_steps: max_steps
-                        .saturating_sub(u32::try_from(turns.len()).unwrap_or(u32::MAX)),
-                    max_model_calls: max_calls.saturating_sub(metrics.calls),
-                    ..request.clone()
-                },
-                decision: decision.clone(),
-                screen: before,
-                target,
-                turns: turns.clone(),
-                history: history.clone(),
-                unchanged,
-                metrics: metrics.clone(),
-            };
-            return queue_confirmation(&runtime, pending_run);
-        }
-        if let Some(stop) = stop {
-            return run_response(stop, turns, Some(decision), metrics);
-        }
-        if decision.operation == JevOperation::TypeText {
-            next_text = texts.next();
-        }
-        if decision.operation == JevOperation::Drill {
-            root = decision.target.as_ref().map(|target| target.ref_id.clone());
-        } else if decision.operation == JevOperation::Widen {
-            root = None;
-        }
-        let Ok(after) = observe_async(backend.clone(), request.app.clone(), root.clone()).await
-        else {
-            return action_failed_response(turns, decision, metrics);
-        };
-        let changed = fingerprint(&after) != before_fingerprint
-            || matches!(
-                decision.operation,
-                JevOperation::Drill | JevOperation::Widen
-            );
-        unchanged = if changed {
-            0
-        } else {
-            unchanged.saturating_add(1)
-        };
-        record_turn(&mut turns, &mut history, &decision, changed);
-        if unchanged >= 3 {
-            return run_response(JevStopReason::Stalled, turns, None, metrics);
-        }
-    }
-}
-
 fn selected_target(screen: &Screen, decision: &JevDecision) -> Option<Candidate> {
     decision
         .target
@@ -327,6 +223,43 @@ fn selected_target(screen: &Screen, decision: &JevDecision) -> Option<Candidate>
                 .find(|candidate| candidate.ref_id == target.ref_id)
         })
         .cloned()
+}
+
+fn within_scope(request: &RunGoalRequest, screen: &Screen) -> bool {
+    request.app.eq_ignore_ascii_case(&screen.app)
+        && request
+            .window
+            .as_deref()
+            .is_none_or(|window| screen.window.as_deref() == Some(window))
+}
+
+fn mutates(operation: JevOperation) -> bool {
+    matches!(
+        operation,
+        JevOperation::Click
+            | JevOperation::TypeText
+            | JevOperation::Check
+            | JevOperation::Uncheck
+            | JevOperation::Expand
+            | JevOperation::Collapse
+            | JevOperation::Scroll
+    )
+}
+
+fn target_allowed(request: &RunGoalRequest, candidate: &Candidate) -> bool {
+    request.allowed_targets.is_empty()
+        || request
+            .allowed_targets
+            .iter()
+            .any(|name| exact_label(candidate, name))
+}
+
+fn prepared_text(request: &RunGoalRequest, candidate: &Candidate) -> Option<String> {
+    request
+        .text_slots
+        .iter()
+        .find(|(name, _)| exact_label(candidate, name))
+        .map(|(_, value)| value.clone())
 }
 
 fn queue_confirmation(runtime: &JevRuntime, run: PendingRun) -> DesktopResponse {
@@ -438,7 +371,7 @@ async fn continue_goal<B: AgentBackend>(
     )
     .await;
     if !reply.ok {
-        return action_failed_response(pending.turns, pending.decision, pending.metrics);
+        return action_failed_response(pending.turns, pending.decision, pending.metrics, &reply);
     }
     let mut turns = pending.turns;
     let mut history = pending.history;
@@ -583,6 +516,7 @@ fn same_target(
         JevOperation::Expand => "Expand",
         JevOperation::Collapse => "Collapse",
         JevOperation::Scroll => "Scroll",
+        JevOperation::Drill => "Drill",
         _ => return false,
     };
     before.app == after.app
@@ -595,9 +529,11 @@ fn same_target(
         && old.bounds == current.bounds
         && old.states == current.states
         && (old.name.is_some() || old.description.is_some() || old.bounds.is_some())
-        && current.available_actions.iter().any(|available| {
-            available == action || (operation == JevOperation::TypeText && available == "TypeText")
-        })
+        && (operation == JevOperation::Drill
+            || current.available_actions.iter().any(|available| {
+                available == action
+                    || (operation == JevOperation::TypeText && available == "TypeText")
+            }))
 }
 
 fn stop_reason(decision: JevDecisionKind) -> Option<JevStopReason> {
@@ -615,9 +551,18 @@ fn action_failed_response(
     mut turns: Vec<JevTurn>,
     decision: JevDecision,
     metrics: JevMetrics,
+    failure: &DesktopResponse,
 ) -> DesktopResponse {
     turns.push(failed_turn(&turns, &decision));
-    run_response(JevStopReason::ActionFailed, turns, Some(decision), metrics)
+    let stop = match failure
+        .error
+        .as_ref()
+        .map(|error| error.disposition.delivery)
+    {
+        Some(DeliveryDisposition::NotDelivered) => JevStopReason::ActionFailed,
+        _ => JevStopReason::ActionUncertain,
+    };
+    run_response(stop, turns, Some(decision), metrics)
 }
 
 fn failed_turn(turns: &[JevTurn], decision: &JevDecision) -> JevTurn {
@@ -642,6 +587,27 @@ fn run_response(
     run_response_with_id(stop, turns, pending, metrics, None)
 }
 
+fn run_response_observed(
+    stop: JevStopReason,
+    turns: Vec<JevTurn>,
+    pending: Option<JevDecision>,
+    metrics: JevMetrics,
+    final_observation: Option<JevObservation>,
+) -> DesktopResponse {
+    response(
+        "run-goal",
+        &JevRunResult {
+            verified: final_observation.as_ref().is_some_and(satisfied),
+            final_observation,
+            stop,
+            turns,
+            pending,
+            confirmation_id: None,
+            metrics,
+        },
+    )
+}
+
 fn run_response_with_id(
     stop: JevStopReason,
     turns: Vec<JevTurn>,
@@ -653,6 +619,8 @@ fn run_response_with_id(
         "run-goal",
         &JevRunResult {
             stop,
+            verified: stop == JevStopReason::Done,
+            final_observation: None,
             turns,
             pending,
             confirmation_id,
@@ -691,6 +659,7 @@ async fn resolve<B: AgentBackend>(
         execute,
         history,
         allow_rerank,
+        None,
     )
     .await
 }
@@ -706,11 +675,12 @@ async fn resolve_on_screen<B: AgentBackend>(
     execute: bool,
     history: &[String],
     allow_rerank: bool,
+    scope: Option<&RunGoalRequest>,
 ) -> Result<ResolveOutcome, Box<DesktopResponse>> {
     if let Some(done) = visible_completion(intent, screen) {
         return Ok(done);
     }
-    let space = action_space(screen, text.is_some());
+    let space = scoped_action_space(screen, text.is_some(), scope);
     let evaluation = runtime
         .client
         .evaluate(&policy::request(
@@ -761,23 +731,17 @@ async fn resolve_on_screen<B: AgentBackend>(
         operation,
         selected.as_ref(),
     ));
-    let mut decision = gate_with_evidence(
+    let decision = gate_decision(&GateInput {
+        intent,
         operation,
+        operation_name: &operation_name,
+        operation_confidence,
         confidence,
         destructive,
-        exact_named_match(intent, selected.as_ref().map(|(candidate, _)| candidate))
-            || positional_match(
-                intent,
-                selected.as_ref().map(|(candidate, _)| candidate),
-                space.targets.get(&operation_name),
-            ),
-    );
-    if space.targets.contains_key(&operation_name) && selected.is_none() {
-        decision = JevDecisionKind::Abstain;
-    }
-    if operation == JevOperation::TypeText && text.is_none() {
-        decision = JevDecisionKind::NeedsText;
-    }
+        selected: selected.as_ref(),
+        space: &space,
+        has_text: text.is_some(),
+    });
     let target = selected
         .as_ref()
         .map(|(candidate, _)| target_payload(candidate));
@@ -804,6 +768,67 @@ async fn resolve_on_screen<B: AgentBackend>(
         evaluations,
         action_failure,
     })
+}
+
+fn scoped_action_space(
+    screen: &Screen,
+    has_text: bool,
+    scope: Option<&RunGoalRequest>,
+) -> policy::ActionSpace {
+    let mut space = action_space(screen, has_text);
+    if let Some(scope) = scope {
+        space.targets.retain(|operation, candidates| {
+            let Some(parsed) = parse_operation(operation) else {
+                return false;
+            };
+            if mutates(parsed)
+                && !scope.allowed_operations.is_empty()
+                && !scope.allowed_operations.contains(&parsed)
+            {
+                return false;
+            }
+            candidates.retain(|_, candidate| target_allowed(scope, candidate));
+            !candidates.is_empty()
+        });
+    }
+    space
+}
+
+struct GateInput<'a> {
+    intent: &'a str,
+    operation: JevOperation,
+    operation_name: &'a str,
+    operation_confidence: f64,
+    confidence: f64,
+    destructive: f64,
+    selected: Option<&'a (Candidate, f64)>,
+    space: &'a policy::ActionSpace,
+    has_text: bool,
+}
+
+fn gate_decision(input: &GateInput<'_>) -> JevDecisionKind {
+    let candidate = input.selected.map(|(candidate, _)| candidate);
+    let mut decision = gate_with_evidence(
+        input.operation,
+        input.confidence,
+        input.destructive,
+        exact_named_match(input.intent, candidate)
+            || positional_match(
+                input.intent,
+                candidate,
+                input.space.targets.get(input.operation_name),
+            ),
+    );
+    if mutates(input.operation) && input.operation_confidence < policy::ACT {
+        decision = JevDecisionKind::Abstain;
+    }
+    if input.space.targets.contains_key(input.operation_name) && input.selected.is_none() {
+        decision = JevDecisionKind::Abstain;
+    }
+    if input.operation == JevOperation::TypeText && !input.has_text {
+        decision = JevDecisionKind::NeedsText;
+    }
+    decision
 }
 
 fn local_destructive_score(

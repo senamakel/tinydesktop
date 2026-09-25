@@ -104,8 +104,17 @@ sanitizes it and sends `x-sdk-name` only to that exact backend endpoint.
 
 Jev receives a closed choice of operations and compatible accessibility refs;
 it never generates text or bypasses desktop delivery checks. Existing field
-values are withheld unless the caller opts in. Actions judged hard to undo
-always stop with `confirmation_required`.
+values are withheld unless the caller opts in. A host can send one bounded
+`RunGoal` task with an exact window, allowed operations and target labels,
+named prepared text, and accessibility-visible success predicates. The module
+checks the predicates independently after every action. An action uses a fresh
+snapshot and must still match the selected target before mutation.
+
+By default, actions judged hard to undo stop with `confirmation_required`.
+When a host explicitly sets `require_confirmations: false`, consequential
+actions inside the caller's scope continue in the same bounded call. The OS
+permission preflight and delivery safeguards still apply. A timed-out or
+uncertain mutation stops without replay.
 
 `RunGoal` returns a `confirmation_id` with the pending operation and target.
 After showing those details to a person, the host calls the same confidential
