@@ -76,6 +76,7 @@ fn agentic_requests_default_to_not_sharing_field_values() {
 
     assert!(!resolve.include_values);
     assert!(!run.include_values);
+    assert!(run.window_id.is_none());
     assert_eq!((run.max_steps, run.max_model_calls), (40, 80));
     assert!(run.continuation.is_none());
 }
@@ -112,6 +113,7 @@ fn scoped_goal_additions_are_backward_compatible_and_have_stable_wire_names() {
     assert_eq!(old.max_elapsed_ms, 120_000);
     let scoped: RunGoalRequest = serde_json::from_value(json!({
         "app":"TextEdit", "goal":"type", "window":"Untitled",
+        "window_id":"w-515619",
         "allowed_operations":["TYPE_TEXT"],
         "allowed_targets":["Document"],
         "text_slots":{"Document":"marker"},
@@ -121,6 +123,7 @@ fn scoped_goal_additions_are_backward_compatible_and_have_stable_wire_names() {
     }))
     .unwrap();
     assert_eq!(scoped.allowed_operations, vec![JevOperation::TypeText]);
+    assert_eq!(scoped.window_id.as_deref(), Some("w-515619"));
     assert_eq!(
         scoped.success,
         vec![VisiblePredicate::ValueContains {

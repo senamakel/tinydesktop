@@ -11,6 +11,7 @@ fn checks_named_value_and_state_without_returning_unrequested_values() {
     let screen = Screen {
         app: "TextEdit".into(),
         window: Some("Untitled".into()),
+        window_id: None,
         surface: "window".into(),
         root: None,
         candidates: Vec::new(),
@@ -52,6 +53,7 @@ fn ambiguous_values_do_not_verify() {
     let screen = Screen {
         app: "App".into(),
         window: None,
+        window_id: None,
         surface: "window".into(),
         root: None,
         candidates: Vec::new(),
@@ -72,6 +74,7 @@ fn description_matches_even_when_a_distinct_name_exists() {
     let screen = Screen {
         app: "App".into(),
         window: None,
+        window_id: None,
         surface: "window".into(),
         root: None,
         candidates: Vec::new(),
@@ -95,6 +98,7 @@ fn empty_exact_value_is_a_valid_cleared_field_condition() {
     let screen = Screen {
         app: "App".into(),
         window: None,
+        window_id: None,
         surface: "window".into(),
         root: None,
         candidates: Vec::new(),

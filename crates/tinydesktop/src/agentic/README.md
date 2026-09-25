@@ -1,7 +1,7 @@
 # Native Jev task loop
 
 `RunGoal` keeps a bounded desktop task inside the module. The caller supplies
-the app, optional exact window, prepared values, allowed actions and targets,
+the app, optional exact window ID and title, prepared values, allowed actions and targets,
 and visible success conditions. `policy.rs` builds Jev's closed choices and
 gates the selected operation and target probabilities independently. `screen.rs`
 collects bounded accessibility observations. `verify.rs` checks the caller's
@@ -11,7 +11,9 @@ label; this identifier is retained in fresh-target comparison.
 
 Each step observes, asks Jev to choose, reobserves the chosen target, acts once,
 and observes again. A changed or ambiguous target stops before mutation. A
-possibly delivered failed or timed-out action stops as `action_uncertain`; the
+specified window ID is sent with every snapshot, including reobservation; a
+missing or different window stops the task rather than selecting another one.
+A possibly delivered failed or timed-out action stops as `action_uncertain`; the
 module does not retry it. OS permission errors come from the underlying desktop
 command preflight. With `require_confirmations: true` (the default), a
 consequential action returns a one-use continuation handle. The host may set

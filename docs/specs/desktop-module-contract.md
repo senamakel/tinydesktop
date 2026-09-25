@@ -51,8 +51,10 @@ engine's argument types, the permission preflight, and the bus surface.
 - Execution gates on the selected option's probability, not Jev's distribution
   concentration. Exact accessible names and explicitly requested first/topmost
   rows may add deterministic identity evidence but never bypass risk checks.
-- A scoped goal binds an exact app and optional window, allowed operations and
+- A scoped goal binds an exact app and optional window ID/title, allowed operations and
   exact target labels, prepared named text, and all-of visible success predicates.
+  A supplied window ID is included in every snapshot, and a missing or different
+  window stops execution without falling back to a newly focused window.
   The module reobserves immediately before every mutation, checks operation and
   target probabilities separately, and verifies completion from the accessibility
   tree rather than accepting Jev's `DONE` alone. A task stops at 40 actions,
