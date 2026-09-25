@@ -2,12 +2,17 @@
 
 use serde::Deserialize;
 use serde_json::{Value, json};
+use std::hash::{Hash, Hasher};
 use tinydesktop_bus::{DesktopResponse, SnapshotRequest, Surface};
 
 use crate::Desktop;
 
 const MAX_TREE_DEPTH: usize = 64;
 const MAX_VISITED_NODES: usize = 4_096;
+const MAX_FINGERPRINT_NODES: usize = 512;
+const MAX_FINGERPRINT_ITEMS: usize = 16;
+const MAX_FINGERPRINT_BYTES: usize = 128;
+const MAX_FINGERPRINT_VALUE_DEPTH: usize = 4;
 
 /// One ref-bearing accessibility node offered to Jev.
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -285,18 +290,70 @@ pub(super) fn fingerprint(screen: &Screen) -> String {
     } else {
         &screen.observed
     };
-    visible
-        .iter()
-        .map(|node| {
-            format!(
-                "{}:{}:{:?}:{:?}:{:?}",
-                node.role,
-                node.label().unwrap_or_default(),
-                node.path,
-                node.states,
-                node.value
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("|")
+    let mut hash = std::collections::hash_map::DefaultHasher::new();
+    visible.len().hash(&mut hash);
+    for node in visible.iter().take(MAX_FINGERPRINT_NODES) {
+        hash_text(&node.role, &mut hash);
+        hash_text(node.label().unwrap_or_default(), &mut hash);
+        hash_texts(&node.path, &mut hash);
+        hash_texts(&node.states, &mut hash);
+        hash_texts(&node.available_actions, &mut hash);
+        node.children_count.hash(&mut hash);
+        hash_value(node.value.as_ref(), 0, &mut hash);
+    }
+    format!("{:016x}", hash.finish())
 }
+
+fn hash_text(text: &str, hash: &mut impl Hasher) {
+    text.len().hash(hash);
+    let end = text.floor_char_boundary(text.len().min(MAX_FINGERPRINT_BYTES));
+    text[..end].hash(hash);
+}
+
+fn hash_texts(texts: &[String], hash: &mut impl Hasher) {
+    texts.len().hash(hash);
+    for text in texts.iter().take(MAX_FINGERPRINT_ITEMS) {
+        hash_text(text, hash);
+    }
+}
+
+fn hash_value(value: Option<&Value>, depth: usize, hash: &mut impl Hasher) {
+    if depth >= MAX_FINGERPRINT_VALUE_DEPTH {
+        return;
+    }
+    match value {
+        None => 0_u8.hash(hash),
+        Some(Value::Null) => 1_u8.hash(hash),
+        Some(Value::Bool(value)) => {
+            2_u8.hash(hash);
+            value.hash(hash);
+        }
+        Some(Value::Number(value)) => {
+            3_u8.hash(hash);
+            value.to_string().hash(hash);
+        }
+        Some(Value::String(value)) => {
+            4_u8.hash(hash);
+            hash_text(value, hash);
+        }
+        Some(Value::Array(values)) => {
+            5_u8.hash(hash);
+            values.len().hash(hash);
+            for value in values.iter().take(MAX_FINGERPRINT_ITEMS) {
+                hash_value(Some(value), depth + 1, hash);
+            }
+        }
+        Some(Value::Object(values)) => {
+            6_u8.hash(hash);
+            values.len().hash(hash);
+            for (key, value) in values.iter().take(MAX_FINGERPRINT_ITEMS) {
+                hash_text(key, hash);
+                hash_value(Some(value), depth + 1, hash);
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+#[path = "screen_tests.rs"]
+mod tests;
