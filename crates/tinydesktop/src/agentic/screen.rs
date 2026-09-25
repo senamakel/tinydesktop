@@ -9,7 +9,7 @@ use crate::Desktop;
 
 const MAX_TREE_DEPTH: usize = 64;
 const MAX_VISITED_NODES: usize = 4_096;
-const MAX_FINGERPRINT_NODES: usize = 512;
+const MAX_FINGERPRINT_NODES: usize = MAX_VISITED_NODES;
 const MAX_FINGERPRINT_ITEMS: usize = 16;
 const MAX_FINGERPRINT_BYTES: usize = 128;
 const MAX_FINGERPRINT_VALUE_DEPTH: usize = 4;

@@ -370,22 +370,19 @@ async fn continue_goal<B: AgentBackend>(
     .await;
     let changed = if let Ok(Ok(after)) = after {
         if !within_scope(&pending.request, &after) {
-            record_turn(&mut turns, &mut history, &confirmed, false);
-            return run_response(
-                JevStopReason::ScopeChanged,
-                turns,
-                Some(confirmed),
-                pending.metrics,
-            );
+            return confirmed_scope_changed(&pending, &confirmed, &mut turns, &mut history);
         }
         if let Some(reply) = confirmed_unverified_result(
+            &backend,
             &pending,
             &after,
             delivered_unverified,
             &confirmed,
             &mut turns,
             &mut history,
-        ) {
+        )
+        .await
+        {
             return reply;
         }
         fingerprint(&after) != fingerprint(&fresh)
@@ -434,6 +431,21 @@ async fn continue_goal<B: AgentBackend>(
     )
 }
 
+fn confirmed_scope_changed(
+    pending: &PendingRun,
+    confirmed: &JevDecision,
+    turns: &mut Vec<JevTurn>,
+    history: &mut Vec<String>,
+) -> DesktopResponse {
+    record_turn(turns, history, confirmed, false);
+    run_response(
+        JevStopReason::ScopeChanged,
+        turns.clone(),
+        Some(confirmed.clone()),
+        pending.metrics.clone(),
+    )
+}
+
 fn approved_pending(
     runtime: &JevRuntime,
     continuation: &GoalContinuation,
@@ -456,7 +468,8 @@ fn remaining_goal_millis(pending: &PendingRun) -> u64 {
     })
 }
 
-fn confirmed_unverified_result(
+async fn confirmed_unverified_result<B: AgentBackend>(
+    backend: &B,
     pending: &PendingRun,
     after: &Screen,
     delivered_unverified: bool,
@@ -467,7 +480,42 @@ fn confirmed_unverified_result(
     if !delivered_unverified || confirmed.destructive < policy::DESTRUCTIVE {
         return None;
     }
-    let evidence = verify(after, &pending.request.success);
+    let mut evidence = verify(after, &pending.request.success);
+    if !pending.request.success.is_empty() {
+        let settle_until = Instant::now() + Duration::from_secs(2);
+        while !satisfied(&evidence) && Instant::now() < settle_until {
+            let Some(remaining) = remaining_goal_time(pending) else {
+                break;
+            };
+            tokio::time::sleep(Duration::from_millis(200).min(remaining)).await;
+            let Some(remaining) = remaining_goal_time(pending) else {
+                break;
+            };
+            let observed = tokio::time::timeout(
+                remaining,
+                observe_async(
+                    backend.clone(),
+                    pending.request.app.clone(),
+                    pending.request.window_id.clone(),
+                    pending.request.root.clone(),
+                ),
+            )
+            .await;
+            let Ok(Ok(screen)) = observed else {
+                continue;
+            };
+            if !within_scope(&pending.request, &screen) {
+                record_turn(turns, history, confirmed, false);
+                return Some(run_response(
+                    JevStopReason::ScopeChanged,
+                    turns.clone(),
+                    Some(confirmed.clone()),
+                    pending.metrics.clone(),
+                ));
+            }
+            evidence = verify(&screen, &pending.request.success);
+        }
+    }
     let verified = satisfied(&evidence);
     record_turn(turns, history, confirmed, verified);
     Some(run_response_observed(

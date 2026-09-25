@@ -41,3 +41,24 @@ fn large_accessibility_fields_produce_fixed_size_fingerprint() {
     assert_eq!(digest.len(), 16);
     assert!(digest.bytes().all(|byte| byte.is_ascii_hexdigit()));
 }
+
+#[test]
+fn changes_after_the_first_512_visible_nodes_change_fingerprint() {
+    let mut observed = (0..600)
+        .map(|index| Candidate {
+            role: "statictext".to_owned(),
+            name: Some(format!("Status {index}")),
+            ..Candidate::default()
+        })
+        .collect::<Vec<_>>();
+    let before = Screen {
+        observed: observed.clone(),
+        ..screen(Candidate::default())
+    };
+    observed[599].name = Some("Finished".to_owned());
+    let after = Screen {
+        observed,
+        ..before.clone()
+    };
+    assert_ne!(fingerprint(&before), fingerprint(&after));
+}

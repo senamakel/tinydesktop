@@ -710,6 +710,48 @@ async fn approved_unverified_consequential_action_without_predicate_never_replay
     assert_eq!(*operations.lock().unwrap(), vec![JevOperation::Click]);
 }
 
+#[tokio::test]
+async fn approved_unverified_action_waits_for_delayed_visible_success() {
+    let (inner, operations) = backend(4);
+    inner.screens.lock().unwrap()[3].candidates[0].name = Some("Finished".into());
+    let backend = UnverifiedClickBackend { inner };
+    let runtime = runtime(vec![response_with("CLICK", 0.95, "1", 0.95, 0.9)]);
+    let stopped = run_goal_with(
+        backend.clone(),
+        runtime.clone(),
+        RunGoalRequest {
+            app: "Spotify".into(),
+            goal: "send the selected item".into(),
+            success: vec![VisiblePredicate::NamePresent {
+                name: "Finished".into(),
+            }],
+            ..RunGoalRequest::default()
+        },
+    )
+    .await;
+    let stopped: tinydesktop_bus::JevRunResult =
+        serde_json::from_value(stopped.data.unwrap()).unwrap();
+    assert_eq!(stopped.stop, JevStopReason::ConfirmationRequired);
+    let resumed = run_goal_with(
+        backend,
+        runtime,
+        RunGoalRequest {
+            continuation: Some(GoalContinuation {
+                id: stopped.confirmation_id.unwrap(),
+                approve: true,
+            }),
+            ..RunGoalRequest::default()
+        },
+    )
+    .await;
+    let result: tinydesktop_bus::JevRunResult =
+        serde_json::from_value(resumed.data.unwrap()).unwrap();
+    assert_eq!(result.stop, JevStopReason::Done);
+    assert!(result.verified);
+    assert_eq!(result.turns.len(), 1);
+    assert_eq!(*operations.lock().unwrap(), vec![JevOperation::Click]);
+}
+
 #[test]
 fn goal_verifies_visible_static_text_without_an_action_ref() {
     let reply = DesktopResponse::ok(
