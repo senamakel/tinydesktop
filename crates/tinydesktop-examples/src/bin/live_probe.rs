@@ -158,6 +158,6 @@ mod tests {
         for _ in 0..32 {
             tree = json!({"role": "group", "children": [tree]});
         }
-        assert_eq!(print_matching(&tree, "target", "", 0).unwrap(), 1);
+        assert!(matches!(print_matching(&tree, "target", "", 0), Ok(1)));
     }
 }

@@ -117,19 +117,6 @@ fn validate_mode(mode: &OsStr) -> Result<(), io::Error> {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::validate_mode;
-    use std::ffi::OsStr;
-
-    #[test]
-    fn mode_is_checked_before_module_setup() {
-        assert!(validate_mode(OsStr::new("probe")).is_ok());
-        assert!(validate_mode(OsStr::new("run")).is_ok());
-        assert!(validate_mode(OsStr::new("typo")).is_err());
-    }
-}
-
 async fn run_calculation(proxy: &tinybus::Proxy) -> Result<(), Box<dyn std::error::Error>> {
     reset_calculator(proxy).await?;
     let reply: DesktopResponse = proxy.call_confidential(names::methods::RUN_GOAL, (
@@ -252,5 +239,18 @@ fn print_nodes(node: Option<&Value>, depth: usize) {
         for child in children {
             print_nodes(Some(child), depth + 1);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_mode;
+    use std::ffi::OsStr;
+
+    #[test]
+    fn mode_is_checked_before_module_setup() {
+        assert!(validate_mode(OsStr::new("probe")).is_ok());
+        assert!(validate_mode(OsStr::new("run")).is_ok());
+        assert!(validate_mode(OsStr::new("typo")).is_err());
     }
 }
