@@ -141,6 +141,7 @@ impl<B: AgentBackend> GoalLoop<B> {
             observe_async(
                 self.backend.clone(),
                 self.request.app.clone(),
+                self.request.window_id.clone(),
                 self.root.clone(),
             ),
         )

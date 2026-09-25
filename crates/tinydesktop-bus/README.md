@@ -120,7 +120,8 @@ For a host-managed task whose desktop approvals are disabled, set
 `require_confirmations: false` and provide `success` predicates. The module
 then returns `verified` and compact `final_observation` evidence from the
 last accessibility snapshot. The default remains confirmation for legacy
-callers.
+callers. `RunGoalRequest.window_id` can bind every observation to one ID from
+`ListWindows`, while `window` checks the reported title.
 
 `names::METHODS` lists every member in dispatch order. `crates/tinydesktop`
 asserts both its generated dispatch table and its embedded module manifest

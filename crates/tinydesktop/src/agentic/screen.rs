@@ -58,6 +58,7 @@ impl Candidate {
 pub(super) struct Screen {
     pub(super) app: String,
     pub(super) window: Option<String>,
+    pub(super) window_id: Option<String>,
     pub(super) surface: String,
     pub(super) root: Option<String>,
     pub(super) candidates: Vec<Candidate>,
@@ -67,18 +68,12 @@ pub(super) struct Screen {
 pub(super) fn observe(
     desktop: &Desktop,
     app: &str,
+    window_id: Option<&str>,
     root: Option<&str>,
 ) -> Result<Screen, Box<DesktopResponse>> {
-    let request = SnapshotRequest {
-        app: Some(app.to_owned()),
-        include_bounds: true,
-        interactive_only: false,
-        compact: true,
-        root_ref: root.map(str::to_owned),
-        ..SnapshotRequest::default()
-    };
+    let request = snapshot_request(app, window_id, root);
     let mut reply = desktop.snapshot(request);
-    if !reply.ok && root.is_none() {
+    if !reply.ok && root.is_none() && window_id.is_none() {
         reply = desktop.snapshot(SnapshotRequest {
             app: Some(app.to_owned()),
             max_depth: Some(4),
@@ -87,12 +82,29 @@ pub(super) fn observe(
             ..SnapshotRequest::default()
         });
     }
-    parse_reply(desktop, app, root, reply)
+    parse_reply(desktop, app, window_id, root, reply)
+}
+
+pub(super) fn snapshot_request(
+    app: &str,
+    window_id: Option<&str>,
+    root: Option<&str>,
+) -> SnapshotRequest {
+    SnapshotRequest {
+        app: Some(app.to_owned()),
+        window_id: window_id.map(str::to_owned),
+        include_bounds: true,
+        interactive_only: false,
+        compact: true,
+        root_ref: root.map(str::to_owned),
+        ..SnapshotRequest::default()
+    }
 }
 
 pub(super) fn parse_reply(
     desktop: &Desktop,
     app: &str,
+    window_id: Option<&str>,
     root: Option<&str>,
     mut reply: DesktopResponse,
 ) -> Result<Screen, Box<DesktopResponse>> {
@@ -112,6 +124,7 @@ pub(super) fn parse_reply(
         };
         let scoped = desktop.snapshot(SnapshotRequest {
             app: Some(app.to_owned()),
+            window_id: window_id.map(str::to_owned),
             include_bounds: true,
             compact: true,
             surface: overlay,
@@ -146,6 +159,11 @@ pub(super) fn parse_reply(
         window: data
             .get("window")
             .and_then(|window| window.get("title"))
+            .and_then(Value::as_str)
+            .map(str::to_owned),
+        window_id: data
+            .get("window")
+            .and_then(|window| window.get("id"))
             .and_then(Value::as_str)
             .map(str::to_owned),
         surface,

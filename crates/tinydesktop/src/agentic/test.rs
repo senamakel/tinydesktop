@@ -17,7 +17,9 @@ use super::{
     },
     provider_error, reason, resolve_intent, resolve_intent_with, response as agent_response,
     run_goal, run_goal_with, same_target,
-    screen::{Candidate, NativeId, Screen, describe, fingerprint, observe, parse_reply},
+    screen::{
+        Candidate, NativeId, Screen, describe, fingerprint, observe, parse_reply, snapshot_request,
+    },
     target_payload, visible_completion,
 };
 use serde_json::json;
@@ -170,9 +172,53 @@ struct RecordingTextBackend {
     values: Arc<Mutex<Vec<Option<String>>>>,
 }
 
+#[derive(Clone)]
+struct WindowBoundBackend {
+    inner: FakeBackend,
+    requested: Arc<Mutex<Vec<Option<String>>>>,
+}
+
+impl AgentBackend for WindowBoundBackend {
+    fn observe(
+        &self,
+        app: &str,
+        window_id: Option<&str>,
+        root: Option<&str>,
+    ) -> Result<Screen, Box<DesktopResponse>> {
+        self.requested
+            .lock()
+            .unwrap()
+            .push(window_id.map(str::to_owned));
+        if window_id != Some("w-515619") {
+            return Err(Box::new(DesktopResponse::err(
+                "snapshot",
+                tinydesktop_bus::DesktopError::new(
+                    "WINDOW_NOT_FOUND",
+                    "requested window is unavailable",
+                ),
+            )));
+        }
+        self.inner.observe(app, window_id, root)
+    }
+
+    fn execute(
+        &self,
+        operation: JevOperation,
+        target: Option<Candidate>,
+        text: Option<String>,
+    ) -> DesktopResponse {
+        self.inner.execute(operation, target, text)
+    }
+}
+
 impl AgentBackend for RecordingTextBackend {
-    fn observe(&self, app: &str, root: Option<&str>) -> Result<Screen, Box<DesktopResponse>> {
-        self.inner.observe(app, root)
+    fn observe(
+        &self,
+        app: &str,
+        window_id: Option<&str>,
+        root: Option<&str>,
+    ) -> Result<Screen, Box<DesktopResponse>> {
+        self.inner.observe(app, window_id, root)
     }
 
     fn execute(
@@ -187,7 +233,12 @@ impl AgentBackend for RecordingTextBackend {
 }
 
 impl AgentBackend for FakeBackend {
-    fn observe(&self, _app: &str, _root: Option<&str>) -> Result<Screen, Box<DesktopResponse>> {
+    fn observe(
+        &self,
+        _app: &str,
+        _window_id: Option<&str>,
+        _root: Option<&str>,
+    ) -> Result<Screen, Box<DesktopResponse>> {
         self.screens
             .lock()
             .expect("screen lock")
@@ -225,6 +276,7 @@ fn clickable_screen() -> Screen {
     Screen {
         app: "Spotify".to_owned(),
         window: Some("Liked Songs".to_owned()),
+        window_id: None,
         surface: "window".to_owned(),
         root: None,
         candidates: vec![Candidate {
@@ -452,6 +504,100 @@ async fn scoped_task_executes_two_consequential_steps_in_one_call_without_confir
         *operations.lock().unwrap(),
         vec![JevOperation::Click, JevOperation::Click]
     );
+}
+
+#[test]
+fn snapshot_request_binds_exact_window_id() {
+    let request = snapshot_request("TextEdit", Some("w-515619"), None);
+    assert_eq!(request.app.as_deref(), Some("TextEdit"));
+    assert_eq!(request.window_id.as_deref(), Some("w-515619"));
+    assert_eq!(snapshot_request("TextEdit", None, None).window_id, None);
+}
+
+#[tokio::test]
+async fn goal_keeps_the_chosen_window_id_through_every_observation() {
+    let runtime = runtime(vec![response("CLICK", 0.9, "1")]);
+    let (inner, operations) = backend(3);
+    {
+        let mut screens = inner.screens.lock().unwrap();
+        for screen in screens.iter_mut() {
+            screen.window_id = Some("w-515619".into());
+            screen.window = Some("desktop-e2e-noapproval.txt".into());
+        }
+        screens[2].candidates[0].name = Some("Finished".into());
+    }
+    let requested = Arc::new(Mutex::new(Vec::new()));
+    let backend = WindowBoundBackend {
+        inner,
+        requested: Arc::clone(&requested),
+    };
+    let result = run_goal_with(
+        backend,
+        runtime,
+        RunGoalRequest {
+            app: "Spotify".into(),
+            goal: "complete one action".into(),
+            window: Some("desktop-e2e-noapproval.txt".into()),
+            window_id: Some("w-515619".into()),
+            allowed_operations: vec![JevOperation::Click],
+            allowed_targets: vec!["Play First Song by Artist".into()],
+            success: vec![VisiblePredicate::NamePresent {
+                name: "Finished".into(),
+            }],
+            require_confirmations: false,
+            ..RunGoalRequest::default()
+        },
+    )
+    .await;
+    let result: tinydesktop_bus::JevRunResult =
+        serde_json::from_value(result.data.unwrap()).unwrap();
+    assert!(result.verified);
+    assert_eq!(*operations.lock().unwrap(), vec![JevOperation::Click]);
+    assert_eq!(*requested.lock().unwrap(), vec![Some("w-515619".into()); 3]);
+}
+
+#[tokio::test]
+async fn goal_rejects_a_snapshot_from_a_different_window_before_jev() {
+    let (backend, operations) = backend(1);
+    let result = run_goal_with(
+        backend,
+        runtime(Vec::new()),
+        RunGoalRequest {
+            app: "Spotify".into(),
+            goal: "complete one action".into(),
+            window_id: Some("w-515619".into()),
+            ..RunGoalRequest::default()
+        },
+    )
+    .await;
+    let result: tinydesktop_bus::JevRunResult =
+        serde_json::from_value(result.data.unwrap()).unwrap();
+    assert_eq!(result.stop, JevStopReason::ScopeChanged);
+    assert!(operations.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn missing_bound_window_does_not_fall_back_to_another_window() {
+    let (inner, operations) = backend(1);
+    let requested = Arc::new(Mutex::new(Vec::new()));
+    let backend = WindowBoundBackend {
+        inner,
+        requested: Arc::clone(&requested),
+    };
+    let reply = run_goal_with(
+        backend,
+        runtime(Vec::new()),
+        RunGoalRequest {
+            app: "Spotify".into(),
+            goal: "complete one action".into(),
+            window_id: Some("w-missing".into()),
+            ..RunGoalRequest::default()
+        },
+    )
+    .await;
+    assert_eq!(reply.error.unwrap().code, "WINDOW_NOT_FOUND");
+    assert_eq!(*requested.lock().unwrap(), vec![Some("w-missing".into())]);
+    assert!(operations.lock().unwrap().is_empty());
 }
 
 #[tokio::test]
@@ -1023,8 +1169,14 @@ fn screen_parsing_filters_disabled_nodes_and_builds_descriptions() {
             ]}
         }),
     );
-    let screen = parse_reply(&crate::Desktop::new(), "Spotify", Some("@s:root"), reply)
-        .expect("synthetic snapshot parses");
+    let screen = parse_reply(
+        &crate::Desktop::new(),
+        "Spotify",
+        None,
+        Some("@s:root"),
+        reply,
+    )
+    .expect("synthetic snapshot parses");
     assert_eq!(screen.candidates.len(), 1);
     assert_eq!(
         describe(&screen.candidates[0], false)["untrusted_accessibility_data"]["contains"],
@@ -1047,7 +1199,7 @@ fn textedit_native_identifier_survives_snapshot_and_is_offered_to_jev() {
             }]}
         }),
     );
-    let screen = parse_reply(&crate::Desktop::new(), "TextEdit", None, reply).unwrap();
+    let screen = parse_reply(&crate::Desktop::new(), "TextEdit", None, None, reply).unwrap();
     let field = &screen.candidates[0];
     assert_eq!(field.native_id.as_ref().unwrap().value, "First Text View");
     assert_eq!(
@@ -1153,6 +1305,7 @@ fn action_space_and_requests_cover_every_supported_capability() {
     let screen = Screen {
         app: "App".to_owned(),
         window: Some("Window".to_owned()),
+        window_id: None,
         surface: "window".to_owned(),
         root: None,
         candidates: vec![Candidate {
@@ -1246,7 +1399,7 @@ fn screen_helpers_cover_overlay_values_bounds_and_failed_observation() {
             }]}
         }),
     );
-    let screen = parse_reply(&crate::Desktop::new(), "App", None, reply)
+    let screen = parse_reply(&crate::Desktop::new(), "App", None, None, reply)
         .expect("original synthetic overlay remains usable");
     let with_values = describe(&screen.candidates[0], true);
     assert!(
@@ -1270,13 +1423,19 @@ fn screen_helpers_cover_overlay_values_bounds_and_failed_observation() {
             .is_some()
     );
 
-    let failed = observe(&crate::Desktop::new(), "__tinydesktop_missing__", None)
-        .expect_err("missing app fails");
+    let failed = observe(
+        &crate::Desktop::new(),
+        "__tinydesktop_missing__",
+        None,
+        None,
+    )
+    .expect_err("missing app fails");
     assert!(!failed.ok);
     assert!(
         observe(
             &crate::Desktop::new(),
             "__tinydesktop_missing__",
+            None,
             Some("@s:e1")
         )
         .is_err()
@@ -1286,6 +1445,7 @@ fn screen_helpers_cover_overlay_values_bounds_and_failed_observation() {
         let screen = parse_reply(
             &crate::Desktop::new(),
             "__tinydesktop_missing__",
+            None,
             None,
             DesktopResponse::ok(
                 "snapshot",
@@ -1300,7 +1460,16 @@ fn screen_helpers_cover_overlay_values_bounds_and_failed_observation() {
         "snapshot",
         tinydesktop_bus::DesktopError::new("FAIL", "failed"),
     );
-    assert!(parse_reply(&crate::Desktop::new(), "App", Some("@s:root"), failed_reply).is_err());
+    assert!(
+        parse_reply(
+            &crate::Desktop::new(),
+            "App",
+            None,
+            Some("@s:root"),
+            failed_reply
+        )
+        .is_err()
+    );
     let no_data = DesktopResponse {
         version: tinydesktop_bus::ENVELOPE_VERSION.to_owned(),
         ok: true,
@@ -1308,7 +1477,16 @@ fn screen_helpers_cover_overlay_values_bounds_and_failed_observation() {
         data: None,
         error: None,
     };
-    assert!(parse_reply(&crate::Desktop::new(), "App", Some("@s:root"), no_data).is_err());
+    assert!(
+        parse_reply(
+            &crate::Desktop::new(),
+            "App",
+            None,
+            Some("@s:root"),
+            no_data
+        )
+        .is_err()
+    );
 }
 
 #[test]
@@ -1324,6 +1502,7 @@ fn accessibility_tree_traversal_is_bounded() {
     let bounded = parse_reply(
         &crate::Desktop::new(),
         "App",
+        None,
         Some("@s:root"),
         DesktopResponse::ok("snapshot", json!({"app": "App", "tree": deep})),
     )
@@ -1336,6 +1515,7 @@ fn accessibility_tree_traversal_is_bounded() {
     let bounded = parse_reply(
         &crate::Desktop::new(),
         "App",
+        None,
         Some("@s:root"),
         DesktopResponse::ok(
             "snapshot",

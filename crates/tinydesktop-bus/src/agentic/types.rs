@@ -104,6 +104,8 @@ pub struct RunGoalRequest {
     pub root: Option<String>,
     /// Exact window title to retain throughout the task.
     pub window: Option<String>,
+    /// Exact window ID from `ListWindows`; binds every task observation.
+    pub window_id: Option<String>,
     /// Allowed mutating operations. Empty keeps the legacy operation set.
     pub allowed_operations: Vec<JevOperation>,
     /// Exact accessible names or descriptions of permitted action targets.
@@ -136,6 +138,7 @@ impl Default for RunGoalRequest {
             text: Vec::new(),
             root: None,
             window: None,
+            window_id: None,
             allowed_operations: Vec::new(),
             allowed_targets: Vec::new(),
             text_slots: BTreeMap::new(),

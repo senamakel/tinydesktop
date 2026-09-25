@@ -229,6 +229,10 @@ fn selected_target(screen: &Screen, decision: &JevDecision) -> Option<Candidate>
 fn within_scope(request: &RunGoalRequest, screen: &Screen) -> bool {
     request.app.eq_ignore_ascii_case(&screen.app)
         && request
+            .window_id
+            .as_deref()
+            .is_none_or(|window_id| screen.window_id.as_deref() == Some(window_id))
+        && request
             .window
             .as_deref()
             .is_none_or(|window| screen.window.as_deref() == Some(window))
@@ -367,11 +371,21 @@ async fn continue_goal<B: AgentBackend>(
         observe_async(
             backend.clone(),
             pending.request.app.clone(),
+            pending.request.window_id.clone(),
             pending.request.root.clone(),
         ),
     )
     .await;
     let changed = if let Ok(Ok(after)) = after {
+        if !within_scope(&pending.request, &after) {
+            record_turn(&mut turns, &mut history, &confirmed, false);
+            return run_response(
+                JevStopReason::ScopeChanged,
+                turns,
+                Some(confirmed),
+                pending.metrics,
+            );
+        }
         fingerprint(&after) != fingerprint(&fresh)
     } else {
         record_turn(&mut turns, &mut history, &confirmed, false);
@@ -440,6 +454,7 @@ async fn execute_pending_action<B: AgentBackend>(
         observe_async(
             backend.clone(),
             pending.request.app.clone(),
+            pending.request.window_id.clone(),
             pending.request.root.clone(),
         ),
     )
@@ -596,6 +611,7 @@ fn same_target(
     };
     before.app == after.app
         && before.window == after.window
+        && before.window_id == after.window_id
         && before.surface == after.surface
         && old.role == current.role
         && old.name == current.name
@@ -724,7 +740,13 @@ async fn resolve<B: AgentBackend>(
     history: &[String],
     allow_rerank: bool,
 ) -> Result<ResolveOutcome, Box<DesktopResponse>> {
-    let screen = observe_async(backend.clone(), app.to_owned(), root.map(str::to_owned)).await?;
+    let screen = observe_async(
+        backend.clone(),
+        app.to_owned(),
+        None,
+        root.map(str::to_owned),
+    )
+    .await?;
     resolve_on_screen(
         backend,
         runtime,
@@ -1009,7 +1031,12 @@ async fn rerank(
 }
 
 trait AgentBackend: Clone + Send + 'static {
-    fn observe(&self, app: &str, root: Option<&str>) -> Result<Screen, Box<DesktopResponse>>;
+    fn observe(
+        &self,
+        app: &str,
+        window_id: Option<&str>,
+        root: Option<&str>,
+    ) -> Result<Screen, Box<DesktopResponse>>;
     fn execute(
         &self,
         operation: JevOperation,
@@ -1019,8 +1046,13 @@ trait AgentBackend: Clone + Send + 'static {
 }
 
 impl AgentBackend for Desktop {
-    fn observe(&self, app: &str, root: Option<&str>) -> Result<Screen, Box<DesktopResponse>> {
-        observe(self, app, root)
+    fn observe(
+        &self,
+        app: &str,
+        window_id: Option<&str>,
+        root: Option<&str>,
+    ) -> Result<Screen, Box<DesktopResponse>> {
+        observe(self, app, window_id, root)
     }
 
     fn execute(
@@ -1036,15 +1068,18 @@ impl AgentBackend for Desktop {
 async fn observe_async<B: AgentBackend>(
     backend: B,
     app: String,
+    window_id: Option<String>,
     root: Option<String>,
 ) -> Result<Screen, Box<DesktopResponse>> {
-    tokio::task::spawn_blocking(move || backend.observe(&app, root.as_deref()))
-        .await
-        .map_err(|error| {
-            Box::new(internal_error(&format!(
-                "desktop observation task failed: {error}"
-            )))
-        })?
+    tokio::task::spawn_blocking(move || {
+        backend.observe(&app, window_id.as_deref(), root.as_deref())
+    })
+    .await
+    .map_err(|error| {
+        Box::new(internal_error(&format!(
+            "desktop observation task failed: {error}"
+        )))
+    })?
 }
 
 async fn execute_operation<B: AgentBackend>(
