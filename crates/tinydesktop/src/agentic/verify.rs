@@ -36,11 +36,29 @@ pub(super) fn satisfied(observation: &JevObservation) -> bool {
 }
 
 fn verify_one(candidates: &[Candidate], predicate: &VisiblePredicate) -> JevPredicateResult {
+    if let VisiblePredicate::NameContains { fragment, within } = predicate {
+        let ancestor = format!(" {within:?}");
+        let matched = candidates.iter().any(|candidate| {
+            candidate
+                .name
+                .as_deref()
+                .is_some_and(|name| name.contains(fragment))
+                && candidate.path.iter().any(|part| part.ends_with(&ancestor))
+        });
+        return JevPredicateResult {
+            predicate: predicate.clone(),
+            matched,
+            observed_name: matched.then(|| fragment.clone()),
+            observed_value: None,
+            observed_states: Vec::new(),
+        };
+    }
     let name = match predicate {
         VisiblePredicate::NamePresent { name }
         | VisiblePredicate::ValueEquals { name, .. }
         | VisiblePredicate::ValueContains { name, .. }
         | VisiblePredicate::StateContains { name, .. } => name,
+        VisiblePredicate::NameContains { .. } => unreachable!("handled above"),
     };
     let candidates_with_name = candidates
         .iter()
@@ -65,6 +83,7 @@ fn verify_one(candidates: &[Candidate], predicate: &VisiblePredicate) -> JevPred
                 .iter()
                 .any(|observed| observed.eq_ignore_ascii_case(state))
         }),
+        VisiblePredicate::NameContains { .. } => unreachable!("handled above"),
     };
     JevPredicateResult {
         predicate: predicate.clone(),

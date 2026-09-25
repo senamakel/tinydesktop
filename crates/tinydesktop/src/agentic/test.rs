@@ -178,6 +178,71 @@ struct WindowBoundBackend {
     requested: Arc<Mutex<Vec<Option<String>>>>,
 }
 
+#[derive(Clone)]
+struct ReadinessBackend {
+    inner: FakeBackend,
+    attempts: Arc<Mutex<u32>>,
+    first_error: &'static str,
+}
+
+#[derive(Clone)]
+struct UnverifiedClickBackend {
+    inner: FakeBackend,
+}
+
+impl AgentBackend for UnverifiedClickBackend {
+    fn observe(
+        &self,
+        app: &str,
+        window_id: Option<&str>,
+        root: Option<&str>,
+    ) -> Result<Screen, Box<DesktopResponse>> {
+        self.inner.observe(app, window_id, root)
+    }
+
+    fn execute(
+        &self,
+        operation: JevOperation,
+        target: Option<Candidate>,
+        text: Option<String>,
+    ) -> DesktopResponse {
+        let _ = self.inner.execute(operation, target, text);
+        DesktopResponse::ok(
+            "click",
+            json!({"disposition":{"delivery":"delivered_unverified"}}),
+        )
+    }
+}
+
+impl AgentBackend for ReadinessBackend {
+    fn observe(
+        &self,
+        app: &str,
+        window_id: Option<&str>,
+        root: Option<&str>,
+    ) -> Result<Screen, Box<DesktopResponse>> {
+        let mut attempts = self.attempts.lock().unwrap();
+        *attempts += 1;
+        if *attempts == 1 {
+            return Err(Box::new(DesktopResponse::err(
+                "snapshot",
+                tinydesktop_bus::DesktopError::new(self.first_error, "not ready"),
+            )));
+        }
+        drop(attempts);
+        self.inner.observe(app, window_id, root)
+    }
+
+    fn execute(
+        &self,
+        operation: JevOperation,
+        target: Option<Candidate>,
+        text: Option<String>,
+    ) -> DesktopResponse {
+        self.inner.execute(operation, target, text)
+    }
+}
+
 impl AgentBackend for WindowBoundBackend {
     fn observe(
         &self,
@@ -515,6 +580,123 @@ fn snapshot_request_binds_exact_window_id() {
 }
 
 #[tokio::test]
+async fn goal_waits_for_a_starting_app_but_not_for_denied_permission() {
+    for (code, expected_attempts, done) in [
+        ("APP_NOT_FOUND", 2, true),
+        ("WINDOW_NOT_FOUND", 2, true),
+        ("PERM_DENIED", 1, false),
+    ] {
+        let (inner, _) = backend(1);
+        let attempts = Arc::new(Mutex::new(0));
+        let backend = ReadinessBackend {
+            inner,
+            attempts: Arc::clone(&attempts),
+            first_error: code,
+        };
+        let reply = run_goal_with(
+            backend,
+            runtime(Vec::new()),
+            RunGoalRequest {
+                app: "Spotify".into(),
+                goal: "verify the visible song".into(),
+                success: vec![VisiblePredicate::NamePresent {
+                    name: "Play First Song by Artist".into(),
+                }],
+                ..RunGoalRequest::default()
+            },
+        )
+        .await;
+        assert_eq!(*attempts.lock().unwrap(), expected_attempts, "{code}");
+        if done {
+            let result: tinydesktop_bus::JevRunResult =
+                serde_json::from_value(reply.data.unwrap()).unwrap();
+            assert_eq!(result.stop, JevStopReason::Done);
+            assert!(result.verified);
+        } else {
+            assert_eq!(reply.error.unwrap().code, code);
+        }
+    }
+}
+
+#[tokio::test]
+async fn goal_waits_for_delayed_success_without_replaying_an_unverified_click() {
+    let (inner, operations) = backend(4);
+    inner.screens.lock().unwrap()[3].candidates[0].name = Some("Finished".into());
+    let reply = run_goal_with(
+        UnverifiedClickBackend { inner },
+        runtime(vec![response("CLICK", 0.95, "1")]),
+        RunGoalRequest {
+            app: "Spotify".into(),
+            goal: "click play and verify finished".into(),
+            allowed_operations: vec![JevOperation::Click],
+            allowed_targets: vec!["Play First Song by Artist".into()],
+            success: vec![VisiblePredicate::NamePresent {
+                name: "Finished".into(),
+            }],
+            require_confirmations: false,
+            ..RunGoalRequest::default()
+        },
+    )
+    .await;
+    let result: tinydesktop_bus::JevRunResult =
+        serde_json::from_value(reply.data.unwrap()).unwrap();
+    assert_eq!(result.stop, JevStopReason::Done);
+    assert!(result.verified);
+    assert_eq!(result.turns.len(), 1);
+    assert_eq!(*operations.lock().unwrap(), vec![JevOperation::Click]);
+}
+
+#[test]
+fn goal_verifies_visible_static_text_without_an_action_ref() {
+    let reply = DesktopResponse::ok(
+        "snapshot",
+        json!({
+            "app": "Calculator",
+            "window": {"title": "Calculator"},
+            "tree": {
+                "role": "window",
+                "name": "Calculator",
+                "children": [{
+                    "role": "scrollarea",
+                    "name": "Edit field",
+                    "ref_id": "@s:e1",
+                    "available_actions": ["Scroll"],
+                    "children": [{
+                        "role": "statictext",
+                        "name": "\u{200e}12",
+                        "value": "\u{200e}12"
+                    }]
+                }]
+            }
+        }),
+    );
+    let screen = parse_reply(&crate::Desktop::new(), "Calculator", None, None, reply).unwrap();
+    let evidence = super::verify::verify(
+        &screen,
+        &[VisiblePredicate::NamePresent {
+            name: "\u{200e}12".to_owned(),
+        }],
+    );
+    assert!(super::verify::satisfied(&evidence));
+    assert_eq!(screen.candidates.len(), 1);
+}
+
+#[test]
+fn screen_change_detection_ignores_ephemeral_refs_and_sees_visible_text() {
+    let mut before = clickable_screen();
+    before.observed = vec![Candidate {
+        role: "statictext".into(),
+        name: Some("Old result".into()),
+        ..Candidate::default()
+    }];
+    let mut after = before.clone();
+    after.candidates[0].ref_id = "@new-snapshot:e1".into();
+    assert_eq!(fingerprint(&before), fingerprint(&after));
+    after.observed[0].name = Some("New result".into());
+    assert_ne!(fingerprint(&before), fingerprint(&after));
+}
+
+#[tokio::test]
 async fn goal_keeps_the_chosen_window_id_through_every_observation() {
     let runtime = runtime(vec![response("CLICK", 0.9, "1")]);
     let (inner, operations) = backend(3);
@@ -596,7 +778,13 @@ async fn missing_bound_window_does_not_fall_back_to_another_window() {
     )
     .await;
     assert_eq!(reply.error.unwrap().code, "WINDOW_NOT_FOUND");
-    assert_eq!(*requested.lock().unwrap(), vec![Some("w-missing".into())]);
+    let requested = requested.lock().unwrap();
+    assert!(requested.len() > 1 && requested.len() <= 20);
+    assert!(
+        requested
+            .iter()
+            .all(|window| window.as_deref() == Some("w-missing"))
+    );
     assert!(operations.lock().unwrap().is_empty());
 }
 
@@ -646,7 +834,7 @@ async fn fresh_target_change_prevents_a_mutation() {
 
 #[tokio::test]
 async fn jev_done_cannot_claim_completion_without_visible_evidence() {
-    let runtime = runtime(vec![
+    let (runtime, requests) = runtime_recording(vec![
         response("DONE", 0.9, "none"),
         response("DONE", 0.9, "none"),
     ]);
@@ -669,6 +857,12 @@ async fn jev_done_cannot_claim_completion_without_visible_evidence() {
     assert_eq!(result.stop, JevStopReason::VerificationFailed);
     assert!(!result.verified);
     assert!(operations.lock().unwrap().is_empty());
+    assert!(
+        requests.lock().unwrap()[1].state["recent_actions"][0]
+            .as_str()
+            .unwrap()
+            .contains("required visible success conditions are not yet met")
+    );
 }
 
 #[tokio::test]

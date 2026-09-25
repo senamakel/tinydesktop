@@ -162,6 +162,13 @@ pub enum VisiblePredicate {
         /// Exact accessible name or description.
         name: String,
     },
+    /// A descendant of an exactly named container has a name containing this text.
+    NameContains {
+        /// Required fragment of the descendant's accessible name.
+        fragment: String,
+        /// Exact accessible name of an ancestor container.
+        within: String,
+    },
     /// A named element holds this exact string value.
     ValueEquals {
         /// Exact accessible name or description.

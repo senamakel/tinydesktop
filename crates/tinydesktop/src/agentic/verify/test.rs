@@ -117,3 +117,31 @@ fn empty_exact_value_is_a_valid_cleared_field_condition() {
     );
     assert!(satisfied(&evidence));
 }
+
+#[test]
+fn contained_message_fragment_matches_only_the_named_chat() {
+    let mut screen = Screen {
+        app: "WhatsApp".into(),
+        window: None,
+        window_id: None,
+        surface: "window".into(),
+        root: None,
+        candidates: Vec::new(),
+        observed: vec![Candidate {
+            role: "statictext".into(),
+            name: Some("Your message, Hello from OpenHuman, Sent to Alex Rivera".into()),
+            path: vec!["group \"Messages in chat with Daddy\"".into()],
+            ..Candidate::default()
+        }],
+    };
+    let predicate = VisiblePredicate::NameContains {
+        fragment: "Your message, Hello from OpenHuman".into(),
+        within: "Messages in chat with Alex Rivera".into(),
+    };
+    assert!(!satisfied(&verify(
+        &screen,
+        std::slice::from_ref(&predicate)
+    )));
+    screen.observed[0].path = vec!["group \"Messages in chat with Alex Rivera\"".into()];
+    assert!(satisfied(&verify(&screen, &[predicate])));
+}

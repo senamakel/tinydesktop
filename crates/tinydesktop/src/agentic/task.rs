@@ -20,6 +20,15 @@ enum DecisionFlow {
     Stop(Box<DesktopResponse>),
 }
 
+const APP_READY_WAIT: Duration = Duration::from_secs(3);
+
+fn app_may_still_be_starting(reply: &DesktopResponse) -> bool {
+    reply
+        .error
+        .as_ref()
+        .is_some_and(|error| matches!(error.code.as_str(), "APP_NOT_FOUND" | "WINDOW_NOT_FOUND"))
+}
+
 struct GoalLoop<B> {
     backend: B,
     runtime: JevRuntime,
@@ -96,6 +105,9 @@ fn valid_task_scope(request: &RunGoalRequest) -> bool {
             VisiblePredicate::NamePresent { name } | VisiblePredicate::ValueEquals { name, .. } => {
                 name.trim().is_empty()
             }
+            VisiblePredicate::NameContains { fragment, within } => {
+                fragment.trim().is_empty() || within.trim().is_empty()
+            }
             VisiblePredicate::ValueContains { name, value } => {
                 name.trim().is_empty() || value.is_empty()
             }
@@ -136,20 +148,32 @@ impl<B: AgentBackend> GoalLoop<B> {
     }
 
     async fn observe(&self) -> Result<Screen, Box<DesktopResponse>> {
-        match tokio::time::timeout(
-            self.max_elapsed.saturating_sub(self.started.elapsed()),
-            observe_async(
-                self.backend.clone(),
-                self.request.app.clone(),
-                self.request.window_id.clone(),
-                self.root.clone(),
-            ),
-        )
-        .await
-        {
-            Ok(Ok(screen)) => Ok(screen),
-            Ok(Err(error)) => Err(error),
-            Err(_) => Err(Box::new(self.stop(JevStopReason::TimeBudget, None))),
+        let ready_until = Instant::now() + APP_READY_WAIT;
+        loop {
+            let remaining = self.max_elapsed.saturating_sub(self.started.elapsed());
+            if remaining.is_zero() {
+                return Err(Box::new(self.stop(JevStopReason::TimeBudget, None)));
+            }
+            match tokio::time::timeout(
+                remaining,
+                observe_async(
+                    self.backend.clone(),
+                    self.request.app.clone(),
+                    self.request.window_id.clone(),
+                    self.root.clone(),
+                ),
+            )
+            .await
+            {
+                Ok(Ok(screen)) => return Ok(screen),
+                Ok(Err(error))
+                    if app_may_still_be_starting(&error) && Instant::now() < ready_until =>
+                {
+                    tokio::time::sleep(Duration::from_millis(200).min(remaining)).await;
+                }
+                Ok(Err(error)) => return Err(error),
+                Err(_) => return Err(Box::new(self.stop(JevStopReason::TimeBudget, None))),
+            }
         }
     }
 
@@ -238,6 +262,10 @@ impl<B: AgentBackend> GoalLoop<B> {
         if stop == Some(JevStopReason::Done) && !self.request.success.is_empty() {
             if self.verification_retries < 1 {
                 self.verification_retries += 1;
+                self.history.push(
+                    "DONE was rejected: the required visible success conditions are not yet met. Choose a next action from the current screen."
+                        .to_owned(),
+                );
                 return DecisionFlow::Repeat;
             }
             return DecisionFlow::Stop(Box::new(
@@ -340,7 +368,15 @@ impl<B: AgentBackend> GoalLoop<B> {
         } else if decision.operation == JevOperation::Widen {
             self.root = None;
         }
-        self.after_action(before, decision).await
+        let delivered_unverified = reply
+            .data
+            .as_ref()
+            .and_then(|data| data.get("disposition"))
+            .and_then(|disposition| disposition.get("delivery"))
+            .and_then(serde_json::Value::as_str)
+            == Some("delivered_unverified");
+        self.after_action(before, decision, delivered_unverified)
+            .await
     }
 
     fn current_target(
@@ -399,9 +435,10 @@ impl<B: AgentBackend> GoalLoop<B> {
         &mut self,
         before: &Screen,
         decision: JevDecision,
+        delivered_unverified: bool,
     ) -> Option<DesktopResponse> {
         let after = self.observe().await;
-        let Ok(after) = after else {
+        let Ok(mut after) = after else {
             record_turn(&mut self.turns, &mut self.history, &decision, false);
             return Some(self.stop(JevStopReason::ActionUncertain, Some(decision)));
         };
@@ -416,6 +453,31 @@ impl<B: AgentBackend> GoalLoop<B> {
             if done {
                 record_turn(&mut self.turns, &mut self.history, &decision, true);
                 return Some(self.stop(JevStopReason::Done, None));
+            }
+            if delivered_unverified {
+                let settle = Instant::now() + Duration::from_secs(2);
+                while Instant::now() < settle && self.started.elapsed() < self.max_elapsed {
+                    tokio::time::sleep(Duration::from_millis(200)).await;
+                    let Ok(fresh) = self.observe().await else {
+                        continue;
+                    };
+                    if !within_scope(&self.request, &fresh) {
+                        record_turn(&mut self.turns, &mut self.history, &decision, false);
+                        return Some(self.stop(JevStopReason::ScopeChanged, Some(decision)));
+                    }
+                    let evidence = verify(&fresh, &self.request.success);
+                    let done = satisfied(&evidence);
+                    self.last_observation = Some(evidence);
+                    after = fresh;
+                    if done {
+                        record_turn(&mut self.turns, &mut self.history, &decision, true);
+                        return Some(self.stop(JevStopReason::Done, None));
+                    }
+                }
+                if decision.destructive >= super::policy::DESTRUCTIVE {
+                    record_turn(&mut self.turns, &mut self.history, &decision, false);
+                    return Some(self.stop(JevStopReason::ActionUncertain, Some(decision)));
+                }
             }
         }
         let changed = fingerprint(&after) != fingerprint(before)

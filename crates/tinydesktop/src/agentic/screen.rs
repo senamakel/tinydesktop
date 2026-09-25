@@ -147,7 +147,7 @@ pub(super) fn parse_reply(
     let mut visited = 0_usize;
     collect(&mut root_node, &[], &mut candidates, 0, &mut visited);
     let observed = candidates.clone();
-    candidates.retain(offerable);
+    candidates.retain(|node| !node.ref_id.is_empty() && offerable(node));
     candidates.truncate(254);
 
     Ok(Screen {
@@ -189,9 +189,20 @@ fn collect(
         |name| format!("{} {name:?}", node.role),
     );
     node.path = path.to_vec();
-    if !node.ref_id.is_empty() {
-        out.push(node.clone());
-    }
+    out.push(Candidate {
+        ref_id: node.ref_id.clone(),
+        role: node.role.clone(),
+        name: node.name.clone(),
+        description: node.description.clone(),
+        native_id: node.native_id.clone(),
+        value: node.value.clone(),
+        states: node.states.clone(),
+        available_actions: node.available_actions.clone(),
+        children_count: node.children_count,
+        bounds: node.bounds.clone(),
+        children: Vec::new(),
+        path: node.path.clone(),
+    });
     let mut child_path = path.to_vec();
     if !node.children.is_empty() {
         child_path.push(label);
@@ -269,16 +280,21 @@ pub(super) fn describe(node: &Candidate, include_values: bool) -> Value {
 }
 
 pub(super) fn fingerprint(screen: &Screen) -> String {
-    screen
-        .candidates
+    let visible = if screen.observed.is_empty() {
+        &screen.candidates
+    } else {
+        &screen.observed
+    };
+    visible
         .iter()
         .map(|node| {
             format!(
-                "{}:{}:{}:{:?}",
-                node.ref_id,
+                "{}:{}:{:?}:{:?}:{:?}",
                 node.role,
                 node.label().unwrap_or_default(),
-                (node.states.as_slice(), node.value.as_ref())
+                node.path,
+                node.states,
+                node.value
             )
         })
         .collect::<Vec<_>>()

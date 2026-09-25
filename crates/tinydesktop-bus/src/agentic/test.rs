@@ -147,3 +147,21 @@ fn bounded_snapshot_cannot_claim_an_element_is_absent() {
     }));
     assert!(unsupported.is_err());
 }
+
+#[test]
+fn contained_name_fragment_has_a_stable_wire_shape() {
+    let predicate = VisiblePredicate::NameContains {
+        fragment: "Your message, Hello from OpenHuman".into(),
+        within: "Messages in chat with Alex Rivera".into(),
+    };
+    let wire = json!({
+        "kind": "name_contains",
+        "fragment": "Your message, Hello from OpenHuman",
+        "within": "Messages in chat with Alex Rivera"
+    });
+    assert_eq!(serde_json::to_value(&predicate).unwrap(), wire);
+    assert_eq!(
+        serde_json::from_value::<VisiblePredicate>(wire).unwrap(),
+        predicate
+    );
+}
