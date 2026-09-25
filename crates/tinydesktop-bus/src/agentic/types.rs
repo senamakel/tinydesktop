@@ -1,5 +1,7 @@
 //! Wire types for native Jev-driven desktop control.
 
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 
 /// Jev-compatible decision service selected by the host.
@@ -100,12 +102,28 @@ pub struct RunGoalRequest {
     pub text: Vec<String>,
     /// Optional container ref where observation starts.
     pub root: Option<String>,
+    /// Exact window title to retain throughout the task.
+    pub window: Option<String>,
+    /// Allowed mutating operations. Empty keeps the legacy operation set.
+    pub allowed_operations: Vec<JevOperation>,
+    /// Exact accessible names or descriptions of permitted action targets.
+    /// Empty keeps the legacy target set.
+    pub allowed_targets: Vec<String>,
+    /// Prepared text keyed by the accessible field name or description.
+    pub text_slots: BTreeMap<String, String>,
+    /// Accessibility-visible predicates that must all hold for verified completion.
+    /// Empty preserves legacy Jev completion behavior.
+    pub success: Vec<VisiblePredicate>,
     /// Whether ordinary field values may leave the machine for Jev.
     pub include_values: bool,
     /// Maximum executed actions, capped by the module at 40.
     pub max_steps: u32,
     /// Maximum Jev evaluations, capped by the module at 80.
     pub max_model_calls: u32,
+    /// Whole-task wall-clock budget in milliseconds, capped at five minutes.
+    pub max_elapsed_ms: u64,
+    /// Whether consequential actions require a separate confirmation call.
+    pub require_confirmations: bool,
     /// One-use handle from a previous confirmation stop. Other fields are ignored on continuation.
     pub continuation: Option<GoalContinuation>,
 }
@@ -117,12 +135,79 @@ impl Default for RunGoalRequest {
             goal: String::new(),
             text: Vec::new(),
             root: None,
+            window: None,
+            allowed_operations: Vec::new(),
+            allowed_targets: Vec::new(),
+            text_slots: BTreeMap::new(),
+            success: Vec::new(),
             include_values: false,
             max_steps: 40,
             max_model_calls: 80,
+            max_elapsed_ms: 120_000,
+            require_confirmations: true,
             continuation: None,
         }
     }
+}
+
+/// A deterministic condition checked against a fresh accessibility snapshot.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum VisiblePredicate {
+    /// An element with this exact accessible name or description exists.
+    NamePresent {
+        /// Exact accessible name or description.
+        name: String,
+    },
+    /// A named element holds this exact string value.
+    ValueEquals {
+        /// Exact accessible name or description.
+        name: String,
+        /// Expected complete string value.
+        value: String,
+    },
+    /// A named element's string value contains this caller-supplied fragment.
+    ValueContains {
+        /// Exact accessible name or description.
+        name: String,
+        /// Expected string fragment.
+        value: String,
+    },
+    /// A named element exposes this state token.
+    StateContains {
+        /// Exact accessible name or description.
+        name: String,
+        /// Expected accessibility state token.
+        state: String,
+    },
+}
+
+/// One predicate's compact, host-visible observation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct JevPredicateResult {
+    /// Requested condition.
+    pub predicate: VisiblePredicate,
+    /// Whether the fresh observation satisfied it.
+    pub matched: bool,
+    /// Name of the observed element, when present.
+    pub observed_name: Option<String>,
+    /// Matched caller-supplied value or fragment; unrelated field content is omitted.
+    pub observed_value: Option<String>,
+    /// Observed state tokens only for a state predicate.
+    pub observed_states: Vec<String>,
+}
+
+/// Last bounded accessibility evidence gathered by a goal run.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct JevObservation {
+    /// Application reported by the snapshot.
+    pub app: String,
+    /// Window title reported by the snapshot.
+    pub window: Option<String>,
+    /// Surface type reported by the snapshot.
+    pub surface: String,
+    /// Independent predicate checks.
+    pub predicates: Vec<JevPredicateResult>,
 }
 
 /// Host response to a pending consequential desktop action.
@@ -255,6 +340,14 @@ pub enum JevStopReason {
     Stalled,
     /// A desktop command failed or had uncertain delivery.
     ActionFailed,
+    /// Jev ended before the visible conditions were satisfied.
+    VerificationFailed,
+    /// The wall-clock budget was exhausted.
+    TimeBudget,
+    /// The observed app/window or chosen action left the caller's scope.
+    ScopeChanged,
+    /// A mutation may have been delivered; it must not be replayed blindly.
+    ActionUncertain,
 }
 
 /// Aggregate provider measurements for one result.
@@ -279,6 +372,10 @@ pub struct JevMetrics {
 pub struct JevRunResult {
     /// Structured stop reason.
     pub stop: JevStopReason,
+    /// True only when every requested success predicate was observed.
+    pub verified: bool,
+    /// Last compact observation, if one was obtained.
+    pub final_observation: Option<JevObservation>,
     /// Executed turns in order.
     pub turns: Vec<JevTurn>,
     /// Last decision when the loop stopped before executing it.

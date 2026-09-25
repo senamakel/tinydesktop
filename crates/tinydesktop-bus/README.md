@@ -116,6 +116,11 @@ parses that CLI's stdout needs no second parser.
 `confirmation_id`. A host resumes through `RunGoalRequest.continuation` with
 that ID and an explicit approval or refusal. The module reobserves the target
 before an approved action; stale or ambiguous targets are refused.
+For a host-managed task whose desktop approvals are disabled, set
+`require_confirmations: false` and provide `success` predicates. The module
+then returns `verified` and compact `final_observation` evidence from the
+last accessibility snapshot. The default remains confirmation for legacy
+callers.
 
 `names::METHODS` lists every member in dispatch order. `crates/tinydesktop`
 asserts both its generated dispatch table and its embedded module manifest

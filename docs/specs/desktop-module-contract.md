@@ -41,7 +41,8 @@ engine's argument types, the permission preflight, and the bus surface.
   reinitialization; the module never returns, logs, or traces its API key.
 - Jev chooses only from module-supplied operations and compatible refs. Text is
   caller-supplied, ordinary field values are withheld by default, and a
-  destructive result always stops for confirmation. Local label/goal checks
+  destructive result stops for confirmation by default. A host can explicitly
+  disable confirmations for a bounded, scoped `RunGoal` task. Local label/goal checks
   also force confirmation for delete, send, purchase, payment, submission,
   overwrite, unsafe quit, trash, and sign-out actions.
 - Exact endpoint overrides are limited to the selected provider's published
@@ -50,7 +51,14 @@ engine's argument types, the permission preflight, and the bus surface.
 - Execution gates on the selected option's probability, not Jev's distribution
   concentration. Exact accessible names and explicitly requested first/topmost
   rows may add deterministic identity evidence but never bypass risk checks.
-- Goal runs stop at 40 actions, 80 evaluations, or three unchanged turns.
+- A scoped goal binds an exact app and optional window, allowed operations and
+  exact target labels, prepared named text, and all-of visible success predicates.
+  The module reobserves immediately before every mutation, checks operation and
+  target probabilities separately, and verifies completion from the accessibility
+  tree rather than accepting Jev's `DONE` alone. A task stops at 40 actions,
+  80 evaluations, three unchanged turns, or its five-minute-capped elapsed budget.
+  Uncertain mutations are never replayed. Absence is not a valid success predicate:
+  the bounded snapshot cannot prove it.
 
 ### The envelope
 

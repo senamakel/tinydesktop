@@ -23,7 +23,7 @@ use super::{
 use serde_json::json;
 use tinydesktop_bus::{
     DesktopResponse, GoalContinuation, JevConfig, JevDecisionKind, JevOperation, JevProvider,
-    JevStopReason, RunGoalRequest,
+    JevStopReason, RunGoalRequest, VisiblePredicate,
 };
 use tinyjevclient::{Answer, ChoiceAnswer};
 
@@ -164,6 +164,28 @@ struct FakeBackend {
     fail_execute: bool,
 }
 
+#[derive(Clone)]
+struct RecordingTextBackend {
+    inner: FakeBackend,
+    values: Arc<Mutex<Vec<Option<String>>>>,
+}
+
+impl AgentBackend for RecordingTextBackend {
+    fn observe(&self, app: &str, root: Option<&str>) -> Result<Screen, Box<DesktopResponse>> {
+        self.inner.observe(app, root)
+    }
+
+    fn execute(
+        &self,
+        operation: JevOperation,
+        target: Option<Candidate>,
+        text: Option<String>,
+    ) -> DesktopResponse {
+        self.values.lock().unwrap().push(text.clone());
+        self.inner.execute(operation, target, text)
+    }
+}
+
 impl AgentBackend for FakeBackend {
     fn observe(&self, _app: &str, _root: Option<&str>) -> Result<Screen, Box<DesktopResponse>> {
         self.screens
@@ -213,6 +235,7 @@ fn clickable_screen() -> Screen {
             bounds: Some(json!({"x": 10.0, "y": 100.0})),
             ..Candidate::default()
         }],
+        observed: Vec::new(),
     }
 }
 
@@ -363,7 +386,7 @@ async fn goal_loop_executes_a_safe_choice_then_stops_done() {
         response("CLICK", 0.9, "1"),
         response("DONE", 0.9, "none"),
     ]);
-    let (backend, operations) = backend(3);
+    let (backend, operations) = backend(4);
     let reply = run_goal_with(
         backend,
         runtime,
@@ -388,6 +411,157 @@ async fn goal_loop_executes_a_safe_choice_then_stops_done() {
     assert_eq!((result.metrics.calls, result.metrics.attempts), (2, 2));
 }
 
+#[tokio::test]
+async fn scoped_task_executes_two_consequential_steps_in_one_call_without_confirmations() {
+    let runtime = runtime(vec![
+        response_with("CLICK", 0.94, "1", 0.94, 0.9),
+        response_with("CLICK", 0.94, "1", 0.94, 0.9),
+    ]);
+    let (backend, operations) = backend(6);
+    {
+        let mut screens = backend.screens.lock().unwrap();
+        for screen in screens.iter_mut().skip(2).take(3) {
+            screen.candidates[0].name = Some("Second Step".into());
+        }
+        screens[5].candidates[0].name = Some("Finished".into());
+    }
+    let reply = run_goal_with(
+        backend,
+        runtime,
+        RunGoalRequest {
+            app: "Spotify".into(),
+            goal: "complete the two step task".into(),
+            window: Some("Liked Songs".into()),
+            allowed_operations: vec![JevOperation::Click],
+            allowed_targets: vec!["Play First Song by Artist".into(), "Second Step".into()],
+            success: vec![VisiblePredicate::NamePresent {
+                name: "Finished".into(),
+            }],
+            require_confirmations: false,
+            ..RunGoalRequest::default()
+        },
+    )
+    .await;
+    let result: tinydesktop_bus::JevRunResult =
+        serde_json::from_value(reply.data.unwrap()).unwrap();
+    assert_eq!(result.stop, JevStopReason::Done);
+    assert!(result.verified);
+    assert_eq!(result.turns.len(), 2);
+    assert!(result.confirmation_id.is_none());
+    assert_eq!(
+        *operations.lock().unwrap(),
+        vec![JevOperation::Click, JevOperation::Click]
+    );
+}
+
+#[tokio::test]
+async fn low_operation_probability_cannot_be_rescued_by_a_certain_target() {
+    let runtime = runtime(vec![
+        response_with("CLICK", 0.60, "1", 0.99, 0.0),
+        response_with("CLICK", 0.60, "1", 0.99, 0.0),
+    ]);
+    let (backend, operations) = backend(2);
+    let reply = run_goal_with(
+        backend,
+        runtime,
+        RunGoalRequest {
+            app: "Spotify".into(),
+            goal: "click the play button".into(),
+            ..RunGoalRequest::default()
+        },
+    )
+    .await;
+    let result: tinydesktop_bus::JevRunResult =
+        serde_json::from_value(reply.data.unwrap()).unwrap();
+    assert_eq!(result.stop, JevStopReason::LowConfidence);
+    assert!(operations.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn fresh_target_change_prevents_a_mutation() {
+    let runtime = runtime(vec![response("CLICK", 0.9, "1")]);
+    let (backend, operations) = backend(2);
+    backend.screens.lock().unwrap()[1].candidates[0].name = Some("Different button".into());
+    let reply = run_goal_with(
+        backend,
+        runtime,
+        RunGoalRequest {
+            app: "Spotify".into(),
+            goal: "click play".into(),
+            ..RunGoalRequest::default()
+        },
+    )
+    .await;
+    let result: tinydesktop_bus::JevRunResult =
+        serde_json::from_value(reply.data.unwrap()).unwrap();
+    assert_eq!(result.stop, JevStopReason::StaleTarget);
+    assert!(operations.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn jev_done_cannot_claim_completion_without_visible_evidence() {
+    let runtime = runtime(vec![
+        response("DONE", 0.9, "none"),
+        response("DONE", 0.9, "none"),
+    ]);
+    let (backend, operations) = backend(2);
+    let reply = run_goal_with(
+        backend,
+        runtime,
+        RunGoalRequest {
+            app: "Spotify".into(),
+            goal: "finish the task".into(),
+            success: vec![VisiblePredicate::NamePresent {
+                name: "Finished".into(),
+            }],
+            ..RunGoalRequest::default()
+        },
+    )
+    .await;
+    let result: tinydesktop_bus::JevRunResult =
+        serde_json::from_value(reply.data.unwrap()).unwrap();
+    assert_eq!(result.stop, JevStopReason::VerificationFailed);
+    assert!(!result.verified);
+    assert!(operations.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn continuous_task_rejects_empty_or_blank_scope_before_jev() {
+    let (backend, operations) = backend(1);
+    let request = RunGoalRequest {
+        app: "Spotify".into(),
+        goal: "click play".into(),
+        allowed_operations: vec![JevOperation::Click],
+        allowed_targets: vec!["Play First Song by Artist".into()],
+        success: vec![VisiblePredicate::NamePresent {
+            name: "Finished".into(),
+        }],
+        require_confirmations: false,
+        ..RunGoalRequest::default()
+    };
+    for bad in [
+        RunGoalRequest {
+            allowed_targets: vec![" ".into()],
+            ..request.clone()
+        },
+        RunGoalRequest {
+            success: vec![VisiblePredicate::ValueContains {
+                name: "Document".into(),
+                value: String::new(),
+            }],
+            ..request.clone()
+        },
+        RunGoalRequest {
+            allowed_operations: Vec::new(),
+            ..request.clone()
+        },
+    ] {
+        let reply = run_goal_with(backend.clone(), runtime(Vec::new()), bad).await;
+        assert_eq!(reply.error.unwrap().code, "INVALID_TASK_SCOPE");
+    }
+    assert!(operations.lock().unwrap().is_empty());
+}
+
 async fn run_case(
     bodies: Vec<tinyjevclient::EvaluationResult>,
     screen_count: usize,
@@ -396,7 +570,7 @@ async fn run_case(
     goal: &str,
 ) -> tinydesktop_bus::JevRunResult {
     let runtime = runtime(bodies);
-    let (backend, _) = backend(screen_count);
+    let (backend, _) = backend(screen_count * 3);
     let reply = run_goal_with(
         backend,
         runtime,
@@ -506,6 +680,140 @@ async fn approved_goal_action_reobserves_then_continues_once() {
     )
     .await;
     assert_eq!(replay.error.unwrap().code, "CONFIRMATION_EXPIRED");
+}
+
+#[tokio::test]
+async fn continuation_uses_prepared_named_text_instead_of_an_empty_value() {
+    let first = evaluation(json!({
+        "model":"typesafe/jev-1.13-20260917",
+        "answers":{
+            "operation":{"type":"choice","choice":"TYPE_TEXT","confidence":0.9,
+                "probabilities":{"TYPE_TEXT":0.95,"DONE":0.03,"BLOCKED":0.02}},
+            "type_text_target":{"type":"choice","choice":"1","confidence":0.9,
+                "probabilities":{"1":0.95,"none":0.05}},
+            "destructive":{"type":"noul","noul":0.9}
+        }, "usage":{"input_tokens":10,"output_tokens":2}
+    }));
+    let runtime = runtime(vec![first, response("DONE", 0.9, "none")]);
+    let (inner, _) = backend(4);
+    for screen in inner.screens.lock().unwrap().iter_mut() {
+        screen.candidates[0].role = "text field".into();
+        screen.candidates[0].name = Some("Document".into());
+        screen.candidates[0].available_actions = vec!["SetValue".into()];
+    }
+    let values = Arc::new(Mutex::new(Vec::new()));
+    let backend = RecordingTextBackend {
+        inner,
+        values: Arc::clone(&values),
+    };
+    let stopped = run_goal_with(
+        backend.clone(),
+        runtime.clone(),
+        RunGoalRequest {
+            app: "Spotify".into(),
+            goal: "fill the document".into(),
+            text_slots: BTreeMap::from([("Document".into(), "marker".into())]),
+            ..RunGoalRequest::default()
+        },
+    )
+    .await;
+    let stopped: tinydesktop_bus::JevRunResult =
+        serde_json::from_value(stopped.data.unwrap()).unwrap();
+    assert_eq!(stopped.stop, JevStopReason::ConfirmationRequired);
+    let resumed = run_goal_with(
+        backend,
+        runtime,
+        RunGoalRequest {
+            continuation: Some(GoalContinuation {
+                id: stopped.confirmation_id.unwrap(),
+                approve: true,
+            }),
+            ..RunGoalRequest::default()
+        },
+    )
+    .await;
+    let resumed: tinydesktop_bus::JevRunResult =
+        serde_json::from_value(resumed.data.unwrap()).unwrap();
+    assert_eq!(resumed.stop, JevStopReason::Done);
+    assert_eq!(*values.lock().unwrap(), vec![Some("marker".into())]);
+}
+
+#[tokio::test]
+async fn continuation_never_replays_after_post_action_observation_is_lost() {
+    let runtime = runtime(vec![response_with("CLICK", 0.9, "1", 0.9, 0.9)]);
+    let (backend, operations) = backend(2);
+    let stopped = run_goal_with(
+        backend.clone(),
+        runtime.clone(),
+        RunGoalRequest {
+            app: "Spotify".into(),
+            goal: "send the selected item".into(),
+            ..RunGoalRequest::default()
+        },
+    )
+    .await;
+    let stopped: tinydesktop_bus::JevRunResult =
+        serde_json::from_value(stopped.data.unwrap()).unwrap();
+    let result = run_goal_with(
+        backend,
+        runtime,
+        RunGoalRequest {
+            continuation: Some(GoalContinuation {
+                id: stopped.confirmation_id.unwrap(),
+                approve: true,
+            }),
+            ..RunGoalRequest::default()
+        },
+    )
+    .await;
+    let result: tinydesktop_bus::JevRunResult =
+        serde_json::from_value(result.data.unwrap()).unwrap();
+    assert_eq!(result.stop, JevStopReason::ActionUncertain);
+    assert_eq!(result.turns.len(), 1);
+    assert!(result.turns[0].ok);
+    assert_eq!(*operations.lock().unwrap(), vec![JevOperation::Click]);
+}
+
+#[tokio::test]
+async fn confirmation_wait_consumes_the_original_elapsed_budget() {
+    let runtime = runtime(vec![response_with("CLICK", 0.9, "1", 0.9, 0.9)]);
+    let (backend, operations) = backend(1);
+    let stopped = run_goal_with(
+        backend.clone(),
+        runtime.clone(),
+        RunGoalRequest {
+            app: "Spotify".into(),
+            goal: "send the selected item".into(),
+            max_elapsed_ms: 50,
+            ..RunGoalRequest::default()
+        },
+    )
+    .await;
+    let stopped: tinydesktop_bus::JevRunResult =
+        serde_json::from_value(stopped.data.unwrap()).unwrap();
+    let id = stopped.confirmation_id.unwrap();
+    runtime
+        .pending
+        .lock()
+        .unwrap()
+        .get_mut(&id)
+        .unwrap()
+        .started = Instant::now()
+        .checked_sub(Duration::from_millis(100))
+        .unwrap();
+    let result = run_goal_with(
+        backend,
+        runtime,
+        RunGoalRequest {
+            continuation: Some(GoalContinuation { id, approve: true }),
+            ..RunGoalRequest::default()
+        },
+    )
+    .await;
+    let result: tinydesktop_bus::JevRunResult =
+        serde_json::from_value(result.data.unwrap()).unwrap();
+    assert_eq!(result.stop, JevStopReason::TimeBudget);
+    assert!(operations.lock().unwrap().is_empty());
 }
 
 #[tokio::test]
@@ -661,7 +969,10 @@ async fn goal_loop_preserves_failed_actions_and_post_action_observation_failures
     let failed_runtime = runtime(vec![response("CLICK", 0.9, "1")]);
     let operations = Arc::new(Mutex::new(Vec::new()));
     let failed_backend = FakeBackend {
-        screens: Arc::new(Mutex::new(VecDeque::from([clickable_screen()]))),
+        screens: Arc::new(Mutex::new(VecDeque::from([
+            clickable_screen(),
+            clickable_screen(),
+        ]))),
         operations: Arc::clone(&operations),
         fail_execute: true,
     };
@@ -677,12 +988,12 @@ async fn goal_loop_preserves_failed_actions_and_post_action_observation_failures
     .await;
     let failed: tinydesktop_bus::JevRunResult =
         serde_json::from_value(failed.data.expect("failed run data")).expect("result decodes");
-    assert_eq!(failed.stop, JevStopReason::ActionFailed);
+    assert_eq!(failed.stop, JevStopReason::ActionUncertain);
     assert_eq!(failed.turns.len(), 1);
     assert!(!failed.turns[0].ok);
 
     let observation_runtime = runtime(vec![response("CLICK", 0.9, "1")]);
-    let (backend, _) = backend(1);
+    let (backend, _) = backend(2);
     let lost_screen = run_goal_with(
         backend,
         observation_runtime,
@@ -696,7 +1007,7 @@ async fn goal_loop_preserves_failed_actions_and_post_action_observation_failures
     let lost_screen: tinydesktop_bus::JevRunResult =
         serde_json::from_value(lost_screen.data.expect("lost screen data"))
             .expect("result decodes");
-    assert_eq!(lost_screen.stop, JevStopReason::ActionFailed);
+    assert_eq!(lost_screen.stop, JevStopReason::ActionUncertain);
     assert_eq!(lost_screen.turns.len(), 1);
 }
 
@@ -746,6 +1057,7 @@ fn action_space_and_requests_cover_every_supported_capability() {
             children_count: Some(3),
             ..Candidate::default()
         }],
+        observed: Vec::new(),
     };
     let space = action_space(&screen, true);
     for operation in [
