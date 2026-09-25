@@ -17,6 +17,7 @@ pub(super) struct Candidate {
     pub(super) role: String,
     pub(super) name: Option<String>,
     pub(super) description: Option<String>,
+    pub(super) native_id: Option<NativeId>,
     pub(super) value: Option<Value>,
     pub(super) states: Vec<String>,
     pub(super) available_actions: Vec<String>,
@@ -25,6 +26,31 @@ pub(super) struct Candidate {
     pub(super) children: Vec<Candidate>,
     #[serde(skip)]
     pub(super) path: Vec<String>,
+}
+
+/// Engine-provided platform identifier for an otherwise unlabeled element.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[serde(default)]
+pub(super) struct NativeId {
+    pub(super) kind: String,
+    pub(super) value: String,
+}
+
+impl Candidate {
+    pub(super) fn labels(&self) -> impl Iterator<Item = &str> {
+        [
+            self.name.as_deref(),
+            self.description.as_deref(),
+            self.native_id.as_ref().map(|id| id.value.as_str()),
+        ]
+        .into_iter()
+        .flatten()
+        .filter(|label| !label.is_empty())
+    }
+
+    pub(super) fn label(&self) -> Option<&str> {
+        self.labels().next()
+    }
 }
 
 /// Parsed current surface.
@@ -140,14 +166,10 @@ fn collect(
         return;
     }
     *visited = visited.saturating_add(1);
-    let label = node
-        .name
-        .as_deref()
-        .or(node.description.as_deref())
-        .map_or_else(
-            || node.role.clone(),
-            |name| format!("{} {name:?}", node.role),
-        );
+    let label = node.label().map_or_else(
+        || node.role.clone(),
+        |name| format!("{} {name:?}", node.role),
+    );
     node.path = path.to_vec();
     if !node.ref_id.is_empty() {
         out.push(node.clone());
@@ -204,9 +226,7 @@ pub(super) fn describe(node: &Candidate, include_values: bool) -> Value {
         "what": format!(
             "{}{}",
             node.role,
-            node.name
-                .as_deref()
-                .or(node.description.as_deref())
+            node.label()
                 .map_or_else(String::new, |name| format!(" {name:?}"))
         ),
         "where": if node.path.is_empty() { "top level".to_owned() } else { node.path.join(" > ") },
@@ -221,8 +241,7 @@ pub(super) fn describe(node: &Candidate, include_values: bool) -> Value {
     if let Some(count) = node.children_count {
         value["contains"] = json!(count);
     }
-    if node.name.is_none()
-        && node.description.is_none()
+    if node.label().is_none()
         && node.value.is_none()
         && let Some(bounds) = &node.bounds
     {
@@ -240,7 +259,7 @@ pub(super) fn fingerprint(screen: &Screen) -> String {
                 "{}:{}:{}:{:?}",
                 node.ref_id,
                 node.role,
-                node.name.as_deref().unwrap_or_default(),
+                node.label().unwrap_or_default(),
                 (node.states.as_slice(), node.value.as_ref())
             )
         })

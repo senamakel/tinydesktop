@@ -6,13 +6,8 @@ use super::screen::{Candidate, Screen};
 
 pub(super) fn exact_label(candidate: &Candidate, label: &str) -> bool {
     candidate
-        .name
-        .as_deref()
-        .is_some_and(|name| name.eq_ignore_ascii_case(label))
-        || candidate
-            .description
-            .as_deref()
-            .is_some_and(|description| description.eq_ignore_ascii_case(label))
+        .labels()
+        .any(|candidate_label| candidate_label.eq_ignore_ascii_case(label))
 }
 
 pub(super) fn verify(screen: &Screen, predicates: &[VisiblePredicate]) -> JevObservation {

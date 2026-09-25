@@ -16,8 +16,8 @@ use super::{
         positional_match, request, rerank_request, shortlist, target,
     },
     provider_error, reason, resolve_intent, resolve_intent_with, response as agent_response,
-    run_goal, run_goal_with,
-    screen::{Candidate, Screen, describe, fingerprint, observe, parse_reply},
+    run_goal, run_goal_with, same_target,
+    screen::{Candidate, NativeId, Screen, describe, fingerprint, observe, parse_reply},
     target_payload, visible_completion,
 };
 use serde_json::json;
@@ -1031,6 +1031,121 @@ fn screen_parsing_filters_disabled_nodes_and_builds_descriptions() {
         json!(4)
     );
     assert!(fingerprint(&screen).contains("Play First Song"));
+}
+
+#[test]
+fn textedit_native_identifier_survives_snapshot_and_is_offered_to_jev() {
+    let reply = DesktopResponse::ok(
+        "snapshot",
+        json!({
+            "app": "TextEdit", "window": {"title": "Untitled"},
+            "tree": {"role": "window", "children": [{
+                "ref_id": "@s:e1", "role": "text field", "name": null,
+                "description": null,
+                "native_id": {"kind": "ax_identifier", "value": "First Text View"},
+                "available_actions": ["SetValue"], "value": ""
+            }]}
+        }),
+    );
+    let screen = parse_reply(&crate::Desktop::new(), "TextEdit", None, reply).unwrap();
+    let field = &screen.candidates[0];
+    assert_eq!(field.native_id.as_ref().unwrap().value, "First Text View");
+    assert_eq!(
+        target_payload(field).name.as_deref(),
+        Some("First Text View")
+    );
+    assert!(
+        describe(field, false)["untrusted_accessibility_data"]["what"]
+            .as_str()
+            .unwrap()
+            .contains("First Text View")
+    );
+}
+
+#[test]
+fn changed_native_identifier_fails_fresh_target_validation() {
+    let mut before = clickable_screen();
+    before.candidates[0].name = None;
+    before.candidates[0].native_id = Some(NativeId {
+        kind: "ax_identifier".into(),
+        value: "First Text View".into(),
+    });
+    let mut after = before.clone();
+    after.candidates[0].native_id.as_mut().unwrap().value = "Second Text View".into();
+    assert!(!same_target(
+        &before,
+        &after,
+        &before.candidates[0],
+        &after.candidates[0],
+        JevOperation::Click
+    ));
+}
+
+#[tokio::test]
+async fn unlabeled_textedit_field_completes_scoped_text_task_in_one_call() {
+    let text_choice = evaluation(json!({
+        "model":"typesafe/jev-1.13-20260917",
+        "answers":{
+            "operation":{"type":"choice","choice":"TYPE_TEXT","confidence":0.9,
+                "probabilities":{"TYPE_TEXT":0.95,"DONE":0.03,"BLOCKED":0.02}},
+            "type_text_target":{"type":"choice","choice":"1","confidence":0.9,
+                "probabilities":{"1":0.95,"none":0.05}},
+            "destructive":{"type":"noul","noul":0.05}
+        }, "usage":{"input_tokens":10,"output_tokens":2}
+    }));
+    let runtime = runtime(vec![text_choice]);
+    let (inner, operations) = backend(3);
+    {
+        let mut screens = inner.screens.lock().unwrap();
+        for screen in screens.iter_mut() {
+            screen.app = "TextEdit".into();
+            screen.window = Some("Untitled".into());
+            screen.candidates[0].role = "text field".into();
+            screen.candidates[0].name = None;
+            screen.candidates[0].native_id = Some(NativeId {
+                kind: "ax_identifier".into(),
+                value: "First Text View".into(),
+            });
+            screen.candidates[0].available_actions = vec!["SetValue".into()];
+            screen.candidates[0].value = Some(json!(""));
+        }
+        screens[2].candidates[0].value = Some(json!("marker"));
+    }
+    let values = Arc::new(Mutex::new(Vec::new()));
+    let backend = RecordingTextBackend {
+        inner,
+        values: Arc::clone(&values),
+    };
+    let result = run_goal_with(
+        backend,
+        runtime,
+        RunGoalRequest {
+            app: "TextEdit".into(),
+            goal: "place marker in First Text View".into(),
+            window: Some("Untitled".into()),
+            allowed_operations: vec![JevOperation::TypeText],
+            allowed_targets: vec!["First Text View".into()],
+            text_slots: BTreeMap::from([("First Text View".into(), "marker".into())]),
+            success: vec![VisiblePredicate::ValueContains {
+                name: "First Text View".into(),
+                value: "marker".into(),
+            }],
+            require_confirmations: false,
+            ..RunGoalRequest::default()
+        },
+    )
+    .await;
+    let result: tinydesktop_bus::JevRunResult =
+        serde_json::from_value(result.data.unwrap()).unwrap();
+    assert_eq!(result.stop, JevStopReason::Done);
+    assert!(result.verified);
+    assert_eq!(result.turns.len(), 1);
+    assert_eq!(
+        result.turns[0].target.as_ref().unwrap().name.as_deref(),
+        Some("First Text View")
+    );
+    assert_eq!(*operations.lock().unwrap(), vec![JevOperation::TypeText]);
+    assert_eq!(*values.lock().unwrap(), vec![Some("marker".into())]);
 }
 
 #[test]

@@ -6,6 +6,8 @@ and visible success conditions. `policy.rs` builds Jev's closed choices and
 gates the selected operation and target probabilities independently. `screen.rs`
 collects bounded accessibility observations. `verify.rs` checks the caller's
 conditions without asking Jev to judge its own completion.
+An unlabeled element can use the engine's exact `native_id.value` as its target
+label; this identifier is retained in fresh-target comparison.
 
 Each step observes, asks Jev to choose, reobserves the chosen target, acts once,
 and observes again. A changed or ambiguous target stops before mutation. A
