@@ -298,12 +298,7 @@ pub(super) fn gate_with_evidence(
 }
 
 pub(super) fn exact_named_match(goal: &str, candidate: Option<&Candidate>) -> bool {
-    let Some(name) = candidate.and_then(|candidate| {
-        candidate
-            .name
-            .as_deref()
-            .or(candidate.description.as_deref())
-    }) else {
+    let Some(candidate) = candidate else {
         return false;
     };
     let normalize = |value: &str| {
@@ -319,16 +314,15 @@ pub(super) fn exact_named_match(goal: &str, candidate: Option<&Candidate>) -> bo
             .collect::<String>();
         normalized.split_whitespace().collect::<Vec<_>>().join(" ")
     };
-    let name = normalize(name);
     let goal = normalize(goal);
-    let words = name.split_whitespace().collect::<Vec<_>>();
-    if words.len() < 2 {
-        return false;
-    }
     let padded_goal = format!(" {goal} ");
-    (2..=words.len()).rev().any(|length| {
-        let prefix = words[..length].join(" ");
-        padded_goal.contains(&format!(" {prefix} "))
+    candidate.labels().any(|label| {
+        let name = normalize(label);
+        let words = name.split_whitespace().collect::<Vec<_>>();
+        (2..=words.len()).rev().any(|length| {
+            let prefix = words[..length].join(" ");
+            padded_goal.contains(&format!(" {prefix} "))
+        })
     })
 }
 
@@ -341,14 +335,11 @@ pub(super) fn deterministic_destructive(
         return false;
     }
     let mut evidence = goal.to_ascii_lowercase();
-    if let Some(label) = candidate.and_then(|candidate| {
-        candidate
-            .name
-            .as_deref()
-            .or(candidate.description.as_deref())
-    }) {
-        evidence.push(' ');
-        evidence.push_str(&label.to_ascii_lowercase());
+    if let Some(candidate) = candidate {
+        for label in candidate.labels() {
+            evidence.push(' ');
+            evidence.push_str(&label.to_ascii_lowercase());
+        }
     }
     [
         "delete",

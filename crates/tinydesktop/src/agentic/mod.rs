@@ -600,10 +600,11 @@ fn same_target(
         && old.role == current.role
         && old.name == current.name
         && old.description == current.description
+        && old.native_id == current.native_id
         && old.path == current.path
         && old.bounds == current.bounds
         && old.states == current.states
-        && (old.name.is_some() || old.description.is_some() || old.bounds.is_some())
+        && (old.label().is_some() || old.bounds.is_some())
         && (operation == JevOperation::Drill
             || current.available_actions.iter().any(|available| {
                 available == action
@@ -1094,10 +1095,7 @@ fn target_payload(candidate: &Candidate) -> JevTarget {
     JevTarget {
         ref_id: candidate.ref_id.clone(),
         role: candidate.role.clone(),
-        name: candidate
-            .name
-            .clone()
-            .or_else(|| candidate.description.clone()),
+        name: candidate.label().map(str::to_owned),
     }
 }
 
