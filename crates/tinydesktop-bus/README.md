@@ -122,6 +122,10 @@ then returns `verified` and compact `final_observation` evidence from the
 last accessibility snapshot. The default remains confirmation for legacy
 callers. `RunGoalRequest.window_id` can bind every observation to one ID from
 `ListWindows`, while `window` checks the reported title.
+`success` also accepts `{"kind":"name_contains","fragment":"...","within":"..."}`:
+the fragment must occur in one node's accessible name beneath an ancestor
+whose accessible name exactly matches `within`. This is useful when a visible
+result adds timestamps or delivery status to a stable text fragment.
 
 `names::METHODS` lists every member in dispatch order. `crates/tinydesktop`
 asserts both its generated dispatch table and its embedded module manifest

@@ -6,6 +6,22 @@ and visible success conditions. `policy.rs` builds Jev's closed choices and
 gates the selected operation and target probabilities independently. `screen.rs`
 collects bounded accessibility observations. `verify.rs` checks the caller's
 conditions without asking Jev to judge its own completion.
+Verification inspects visible snapshot nodes even when the accessibility
+engine gives them no actionable ref (for example Calculator's result text).
+Only ref-bearing actionable nodes are offered as Jev action targets.
+The screen-change fingerprint excludes snapshot-qualified refs and includes
+visible text, so a new snapshot ID alone cannot masquerade as progress. When
+an action reports `delivered_unverified`, the loop gives the UI up to two
+seconds to expose the requested success state before asking Jev to decide
+again. It never repeats the delivered action during this settling window.
+`name_contains` verifies a name fragment only under an exactly named ancestor
+container, which permits checking a message in the active chat without
+accepting a matching chat-list row.
+Transient `APP_NOT_FOUND` and `WINDOW_NOT_FOUND` observations are retried for
+at most three seconds with the same app and exact window ID. Permission errors
+are returned immediately. A premature Jev `DONE` adds one corrective note and
+gets one more bounded decision; only the accessibility predicates can complete
+the task.
 An unlabeled element can use the engine's exact `native_id.value` as its target
 label; this identifier is retained in fresh-target comparison.
 
