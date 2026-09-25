@@ -474,11 +474,11 @@ impl<B: AgentBackend> GoalLoop<B> {
                         return Some(self.stop(JevStopReason::Done, None));
                     }
                 }
-                if decision.destructive >= super::policy::DESTRUCTIVE {
-                    record_turn(&mut self.turns, &mut self.history, &decision, false);
-                    return Some(self.stop(JevStopReason::ActionUncertain, Some(decision)));
-                }
             }
+        }
+        if delivered_unverified && decision.destructive >= super::policy::DESTRUCTIVE {
+            record_turn(&mut self.turns, &mut self.history, &decision, false);
+            return Some(self.stop(JevStopReason::ActionUncertain, Some(decision)));
         }
         let changed = fingerprint(&after) != fingerprint(before)
             || matches!(

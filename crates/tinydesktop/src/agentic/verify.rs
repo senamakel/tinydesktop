@@ -38,7 +38,7 @@ pub(super) fn satisfied(observation: &JevObservation) -> bool {
 fn verify_one(candidates: &[Candidate], predicate: &VisiblePredicate) -> JevPredicateResult {
     if let VisiblePredicate::NameContains { fragment, within } = predicate {
         let ancestor = format!(" {within:?}");
-        let matched = candidates.iter().any(|candidate| {
+        let matched_candidate = candidates.iter().find(|candidate| {
             candidate
                 .name
                 .as_deref()
@@ -47,8 +47,8 @@ fn verify_one(candidates: &[Candidate], predicate: &VisiblePredicate) -> JevPred
         });
         return JevPredicateResult {
             predicate: predicate.clone(),
-            matched,
-            observed_name: matched.then(|| fragment.clone()),
+            matched: matched_candidate.is_some(),
+            observed_name: matched_candidate.and_then(|candidate| candidate.name.clone()),
             observed_value: None,
             observed_states: Vec::new(),
         };

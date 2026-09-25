@@ -143,5 +143,10 @@ fn contained_message_fragment_matches_only_the_named_chat() {
         std::slice::from_ref(&predicate)
     )));
     screen.observed[0].path = vec!["group \"Messages in chat with Alex Rivera\"".into()];
-    assert!(satisfied(&verify(&screen, &[predicate])));
+    let evidence = verify(&screen, &[predicate]);
+    assert!(satisfied(&evidence));
+    assert_eq!(
+        evidence.predicates[0].observed_name.as_deref(),
+        Some("Your message, Hello from OpenHuman, Sent to Alex Rivera")
+    );
 }

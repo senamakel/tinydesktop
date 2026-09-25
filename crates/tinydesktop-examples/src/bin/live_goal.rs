@@ -4,7 +4,7 @@
 //! prints Calculator's accessibility controls without contacting Jev; `run`
 //! performs a scoped calculation and verifies the visible result.
 
-use std::{io, path::PathBuf, time::Duration};
+use std::{ffi::OsStr, io, path::PathBuf, time::Duration};
 
 use serde_json::Value;
 use tinybus::{Connection, broker::Broker, module::ModuleHost, transport::memory::MemoryBus};
@@ -20,6 +20,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mode = arguments
         .next()
         .ok_or("usage: live_goal <probe|run> <attested-module>")?;
+    validate_mode(&mode)?;
     let module = PathBuf::from(arguments.next().ok_or("missing module path")?);
     let bus = MemoryBus::new();
     let broker = Broker::new();
@@ -103,12 +104,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         broker_task.abort();
         return Ok(());
     }
-    if mode != "run" {
-        return Err(io::Error::other("mode must be probe or run").into());
-    }
     run_calculation(&proxy).await?;
     broker_task.abort();
     Ok(())
+}
+
+fn validate_mode(mode: &OsStr) -> Result<(), io::Error> {
+    if mode == "probe" || mode == "run" {
+        Ok(())
+    } else {
+        Err(io::Error::other("mode must be probe or run"))
+    }
 }
 
 async fn run_calculation(proxy: &tinybus::Proxy) -> Result<(), Box<dyn std::error::Error>> {
@@ -233,5 +239,18 @@ fn print_nodes(node: Option<&Value>, depth: usize) {
         for child in children {
             print_nodes(Some(child), depth + 1);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_mode;
+    use std::ffi::OsStr;
+
+    #[test]
+    fn mode_is_checked_before_module_setup() {
+        assert!(validate_mode(OsStr::new("probe")).is_ok());
+        assert!(validate_mode(OsStr::new("run")).is_ok());
+        assert!(validate_mode(OsStr::new("typo")).is_err());
     }
 }

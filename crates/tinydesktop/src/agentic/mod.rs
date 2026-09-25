@@ -335,20 +335,12 @@ async fn continue_goal<B: AgentBackend>(
     runtime: JevRuntime,
     continuation: GoalContinuation,
 ) -> DesktopResponse {
-    let pending = match take_pending(&runtime, &continuation.id) {
+    let pending = match approved_pending(&runtime, &continuation) {
         Ok(pending) => pending,
-        Err(error) => return *error,
+        Err(reply) => return *reply,
     };
-    if !continuation.approve {
-        return run_response(
-            JevStopReason::Cancelled,
-            pending.turns,
-            Some(pending.decision),
-            pending.metrics,
-        );
-    }
-    let fresh = match execute_pending_action(&backend, &pending).await {
-        Ok(screen) => screen,
+    let (fresh, delivered_unverified) = match execute_pending_action(&backend, &pending).await {
+        Ok(executed) => executed,
         Err(reply) => return *reply,
     };
     let mut turns = pending.turns.clone();
@@ -378,13 +370,20 @@ async fn continue_goal<B: AgentBackend>(
     .await;
     let changed = if let Ok(Ok(after)) = after {
         if !within_scope(&pending.request, &after) {
-            record_turn(&mut turns, &mut history, &confirmed, false);
-            return run_response(
-                JevStopReason::ScopeChanged,
-                turns,
-                Some(confirmed),
-                pending.metrics,
-            );
+            return confirmed_scope_changed(&pending, &confirmed, &mut turns, &mut history);
+        }
+        if let Some(reply) = confirmed_unverified_result(
+            &backend,
+            &pending,
+            &after,
+            delivered_unverified,
+            &confirmed,
+            &mut turns,
+            &mut history,
+        )
+        .await
+        {
+            return reply;
         }
         fingerprint(&after) != fingerprint(&fresh)
     } else {
@@ -405,9 +404,7 @@ async fn continue_goal<B: AgentBackend>(
     if unchanged >= 3 {
         return run_response(JevStopReason::Stalled, turns, None, pending.metrics);
     }
-    let remaining_ms = remaining_goal_time(&pending).map_or(0, |remaining| {
-        u64::try_from(remaining.as_millis()).unwrap_or(u64::MAX)
-    });
+    let remaining_ms = remaining_goal_millis(&pending);
     let mut request = pending.request;
     request.max_elapsed_ms = remaining_ms;
     if request.max_elapsed_ms == 0 {
@@ -434,6 +431,106 @@ async fn continue_goal<B: AgentBackend>(
     )
 }
 
+fn confirmed_scope_changed(
+    pending: &PendingRun,
+    confirmed: &JevDecision,
+    turns: &mut Vec<JevTurn>,
+    history: &mut Vec<String>,
+) -> DesktopResponse {
+    record_turn(turns, history, confirmed, false);
+    run_response(
+        JevStopReason::ScopeChanged,
+        turns.clone(),
+        Some(confirmed.clone()),
+        pending.metrics.clone(),
+    )
+}
+
+fn approved_pending(
+    runtime: &JevRuntime,
+    continuation: &GoalContinuation,
+) -> Result<PendingRun, Box<DesktopResponse>> {
+    let pending = take_pending(runtime, &continuation.id)?;
+    if !continuation.approve {
+        return Err(Box::new(run_response(
+            JevStopReason::Cancelled,
+            pending.turns,
+            Some(pending.decision),
+            pending.metrics,
+        )));
+    }
+    Ok(pending)
+}
+
+fn remaining_goal_millis(pending: &PendingRun) -> u64 {
+    remaining_goal_time(pending).map_or(0, |remaining| {
+        u64::try_from(remaining.as_millis()).unwrap_or(u64::MAX)
+    })
+}
+
+async fn confirmed_unverified_result<B: AgentBackend>(
+    backend: &B,
+    pending: &PendingRun,
+    after: &Screen,
+    delivered_unverified: bool,
+    confirmed: &JevDecision,
+    turns: &mut Vec<JevTurn>,
+    history: &mut Vec<String>,
+) -> Option<DesktopResponse> {
+    if !delivered_unverified || confirmed.destructive < policy::DESTRUCTIVE {
+        return None;
+    }
+    let mut evidence = verify(after, &pending.request.success);
+    if !pending.request.success.is_empty() {
+        let settle_until = Instant::now() + Duration::from_secs(2);
+        while !satisfied(&evidence) && Instant::now() < settle_until {
+            let Some(remaining) = remaining_goal_time(pending) else {
+                break;
+            };
+            tokio::time::sleep(Duration::from_millis(200).min(remaining)).await;
+            let Some(remaining) = remaining_goal_time(pending) else {
+                break;
+            };
+            let observed = tokio::time::timeout(
+                remaining,
+                observe_async(
+                    backend.clone(),
+                    pending.request.app.clone(),
+                    pending.request.window_id.clone(),
+                    pending.request.root.clone(),
+                ),
+            )
+            .await;
+            let Ok(Ok(screen)) = observed else {
+                continue;
+            };
+            if !within_scope(&pending.request, &screen) {
+                record_turn(turns, history, confirmed, false);
+                return Some(run_response(
+                    JevStopReason::ScopeChanged,
+                    turns.clone(),
+                    Some(confirmed.clone()),
+                    pending.metrics.clone(),
+                ));
+            }
+            evidence = verify(&screen, &pending.request.success);
+        }
+    }
+    let verified = satisfied(&evidence);
+    record_turn(turns, history, confirmed, verified);
+    Some(run_response_observed(
+        if verified {
+            JevStopReason::Done
+        } else {
+            JevStopReason::ActionUncertain
+        },
+        turns.clone(),
+        (!verified).then_some(confirmed.clone()),
+        pending.metrics.clone(),
+        Some(evidence),
+    ))
+}
+
 fn pending_stop(pending: &PendingRun, stop: JevStopReason) -> DesktopResponse {
     run_response(
         stop,
@@ -446,7 +543,7 @@ fn pending_stop(pending: &PendingRun, stop: JevStopReason) -> DesktopResponse {
 async fn execute_pending_action<B: AgentBackend>(
     backend: &B,
     pending: &PendingRun,
-) -> Result<Screen, Box<DesktopResponse>> {
+) -> Result<(Screen, bool), Box<DesktopResponse>> {
     let remaining = remaining_goal_time(pending)
         .ok_or_else(|| Box::new(pending_stop(pending, JevStopReason::TimeBudget)))?;
     let fresh = match tokio::time::timeout(
@@ -505,7 +602,14 @@ async fn execute_pending_action<B: AgentBackend>(
             &reply,
         )));
     }
-    Ok(fresh)
+    let delivered_unverified = reply
+        .data
+        .as_ref()
+        .and_then(|data| data.get("disposition"))
+        .and_then(|disposition| disposition.get("delivery"))
+        .and_then(serde_json::Value::as_str)
+        == Some("delivered_unverified");
+    Ok((fresh, delivered_unverified))
 }
 
 fn remaining_goal_time(pending: &PendingRun) -> Option<Duration> {

@@ -73,8 +73,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             )
             .await?;
         if reply.ok {
-            let tree = reply.data.as_ref().and_then(|data| data.get("tree"));
-            let count = print_matching(tree, &filter, "", 0);
+            let tree = require_tree(&reply)?;
+            let count = print_matching(tree, &filter, "", 0)?;
             println!("matching_nodes={count}");
             task.abort();
             return Ok(());
@@ -84,10 +84,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Err(io::Error::other("no accessible window after 15 seconds").into())
 }
 
-fn print_matching(node: Option<&Value>, filter: &str, parent: &str, depth: usize) -> usize {
-    let Some(node) = node else { return 0 };
+fn require_tree(reply: &DesktopResponse) -> io::Result<&Value> {
+    reply
+        .data
+        .as_ref()
+        .and_then(|data| data.get("tree"))
+        .filter(|tree| tree.is_object())
+        .ok_or_else(|| io::Error::other("successful snapshot has no accessibility tree"))
+}
+
+fn print_matching(node: &Value, filter: &str, parent: &str, depth: usize) -> io::Result<usize> {
     if depth > 32 {
-        return 0;
+        return Err(io::Error::other(
+            "accessibility tree exceeds probe depth limit",
+        ));
     }
     let name = node.get("name").and_then(Value::as_str).unwrap_or("");
     let description = node
@@ -113,8 +123,41 @@ fn print_matching(node: Option<&Value>, filter: &str, parent: &str, depth: usize
     if let Some(children) = node.get("children").and_then(Value::as_array) {
         let next_parent = if name.is_empty() { role } else { name };
         for child in children {
-            count += print_matching(Some(child), filter, next_parent, depth + 1);
+            count += print_matching(child, filter, next_parent, depth + 1)?;
         }
     }
-    count
+    Ok(count)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{print_matching, require_tree};
+    use serde_json::json;
+    use tinydesktop_bus::DesktopResponse;
+
+    #[test]
+    fn successful_reply_without_tree_is_an_error() {
+        let reply = DesktopResponse::ok("snapshot", json!({"app": "Example"}));
+        assert!(require_tree(&reply).is_err());
+        let reply = DesktopResponse::ok("snapshot", json!({"tree": null}));
+        assert!(require_tree(&reply).is_err());
+    }
+
+    #[test]
+    fn deep_tree_reports_incomplete_probe() {
+        let mut tree = json!({"role": "button", "name": "target"});
+        for _ in 0..33 {
+            tree = json!({"role": "group", "children": [tree]});
+        }
+        assert!(print_matching(&tree, "target", "", 0).is_err());
+    }
+
+    #[test]
+    fn boundary_depth_is_included() {
+        let mut tree = json!({"role": "button", "name": "target"});
+        for _ in 0..32 {
+            tree = json!({"role": "group", "children": [tree]});
+        }
+        assert!(matches!(print_matching(&tree, "target", "", 0), Ok(1)));
+    }
 }

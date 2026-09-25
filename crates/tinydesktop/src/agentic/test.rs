@@ -646,6 +646,112 @@ async fn goal_waits_for_delayed_success_without_replaying_an_unverified_click() 
     assert_eq!(*operations.lock().unwrap(), vec![JevOperation::Click]);
 }
 
+#[tokio::test]
+async fn unverified_consequential_action_stops_after_settle_without_replay() {
+    let (inner, operations) = backend(3);
+    let reply = run_goal_with(
+        UnverifiedClickBackend { inner },
+        runtime(vec![response_with("CLICK", 0.95, "1", 0.95, 0.9)]),
+        RunGoalRequest {
+            app: "Spotify".into(),
+            goal: "send the selected item".into(),
+            allowed_operations: vec![JevOperation::Click],
+            allowed_targets: vec!["Play First Song by Artist".into()],
+            success: vec![VisiblePredicate::NamePresent {
+                name: "Finished".into(),
+            }],
+            max_elapsed_ms: 4_000,
+            require_confirmations: false,
+            ..RunGoalRequest::default()
+        },
+    )
+    .await;
+    let result: tinydesktop_bus::JevRunResult =
+        serde_json::from_value(reply.data.unwrap()).unwrap();
+    assert_eq!(result.stop, JevStopReason::ActionUncertain);
+    assert_eq!(result.turns.len(), 1);
+    assert_eq!(*operations.lock().unwrap(), vec![JevOperation::Click]);
+}
+
+#[tokio::test]
+async fn approved_unverified_consequential_action_without_predicate_never_replays() {
+    let (inner, operations) = backend(3);
+    let backend = UnverifiedClickBackend { inner };
+    let runtime = runtime(vec![response_with("CLICK", 0.95, "1", 0.95, 0.9)]);
+    let stopped = run_goal_with(
+        backend.clone(),
+        runtime.clone(),
+        RunGoalRequest {
+            app: "Spotify".into(),
+            goal: "send the selected item".into(),
+            ..RunGoalRequest::default()
+        },
+    )
+    .await;
+    let stopped: tinydesktop_bus::JevRunResult =
+        serde_json::from_value(stopped.data.unwrap()).unwrap();
+    assert_eq!(stopped.stop, JevStopReason::ConfirmationRequired);
+    let resumed = run_goal_with(
+        backend,
+        runtime,
+        RunGoalRequest {
+            continuation: Some(GoalContinuation {
+                id: stopped.confirmation_id.unwrap(),
+                approve: true,
+            }),
+            ..RunGoalRequest::default()
+        },
+    )
+    .await;
+    let result: tinydesktop_bus::JevRunResult =
+        serde_json::from_value(resumed.data.unwrap()).unwrap();
+    assert_eq!(result.stop, JevStopReason::ActionUncertain);
+    assert_eq!(result.turns.len(), 1);
+    assert_eq!(*operations.lock().unwrap(), vec![JevOperation::Click]);
+}
+
+#[tokio::test]
+async fn approved_unverified_action_waits_for_delayed_visible_success() {
+    let (inner, operations) = backend(4);
+    inner.screens.lock().unwrap()[3].candidates[0].name = Some("Finished".into());
+    let backend = UnverifiedClickBackend { inner };
+    let runtime = runtime(vec![response_with("CLICK", 0.95, "1", 0.95, 0.9)]);
+    let stopped = run_goal_with(
+        backend.clone(),
+        runtime.clone(),
+        RunGoalRequest {
+            app: "Spotify".into(),
+            goal: "send the selected item".into(),
+            success: vec![VisiblePredicate::NamePresent {
+                name: "Finished".into(),
+            }],
+            ..RunGoalRequest::default()
+        },
+    )
+    .await;
+    let stopped: tinydesktop_bus::JevRunResult =
+        serde_json::from_value(stopped.data.unwrap()).unwrap();
+    assert_eq!(stopped.stop, JevStopReason::ConfirmationRequired);
+    let resumed = run_goal_with(
+        backend,
+        runtime,
+        RunGoalRequest {
+            continuation: Some(GoalContinuation {
+                id: stopped.confirmation_id.unwrap(),
+                approve: true,
+            }),
+            ..RunGoalRequest::default()
+        },
+    )
+    .await;
+    let result: tinydesktop_bus::JevRunResult =
+        serde_json::from_value(resumed.data.unwrap()).unwrap();
+    assert_eq!(result.stop, JevStopReason::Done);
+    assert!(result.verified);
+    assert_eq!(result.turns.len(), 1);
+    assert_eq!(*operations.lock().unwrap(), vec![JevOperation::Click]);
+}
+
 #[test]
 fn goal_verifies_visible_static_text_without_an_action_ref() {
     let reply = DesktopResponse::ok(
@@ -888,6 +994,20 @@ async fn continuous_task_rejects_empty_or_blank_scope_before_jev() {
             success: vec![VisiblePredicate::ValueContains {
                 name: "Document".into(),
                 value: String::new(),
+            }],
+            ..request.clone()
+        },
+        RunGoalRequest {
+            success: vec![VisiblePredicate::NameContains {
+                fragment: String::new(),
+                within: "Messages in chat with Alex Rivera".into(),
+            }],
+            ..request.clone()
+        },
+        RunGoalRequest {
+            success: vec![VisiblePredicate::NameContains {
+                fragment: "Hello".into(),
+                within: "  ".into(),
             }],
             ..request.clone()
         },
@@ -1376,7 +1496,16 @@ fn screen_parsing_filters_disabled_nodes_and_builds_descriptions() {
         describe(&screen.candidates[0], false)["untrusted_accessibility_data"]["contains"],
         json!(4)
     );
-    assert!(fingerprint(&screen).contains("Play First Song"));
+    let before = fingerprint(&screen);
+    assert_eq!(before.len(), 16);
+    let mut changed = screen.clone();
+    changed
+        .observed
+        .iter_mut()
+        .find(|node| node.name.as_deref() == Some("Play First Song by Artist"))
+        .unwrap()
+        .name = Some("Pause First Song by Artist".into());
+    assert_ne!(before, fingerprint(&changed));
 }
 
 #[test]
