@@ -159,11 +159,6 @@ pub enum VisiblePredicate {
         /// Exact accessible name or description.
         name: String,
     },
-    /// No element with this exact accessible name or description exists.
-    NameAbsent {
-        /// Exact accessible name or description.
-        name: String,
-    },
     /// A named element holds this exact string value.
     ValueEquals {
         /// Exact accessible name or description.

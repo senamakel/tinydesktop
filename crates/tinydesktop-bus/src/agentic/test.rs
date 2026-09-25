@@ -134,3 +134,13 @@ fn scoped_goal_additions_are_backward_compatible_and_have_stable_wire_names() {
         json!("value_contains")
     );
 }
+
+#[test]
+fn bounded_snapshot_cannot_claim_an_element_is_absent() {
+    let unsupported = serde_json::from_value::<RunGoalRequest>(json!({
+        "app": "TextEdit",
+        "goal": "close dialog",
+        "success": [{"kind": "name_absent", "name": "Dialog"}]
+    }));
+    assert!(unsupported.is_err());
+}

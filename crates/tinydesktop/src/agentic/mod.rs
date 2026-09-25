@@ -48,6 +48,7 @@ pub(crate) struct JevRuntime {
 #[derive(Debug)]
 struct PendingRun {
     created: Instant,
+    started: Instant,
     request: RunGoalRequest,
     decision: JevDecision,
     screen: Screen,
@@ -342,55 +343,40 @@ async fn continue_goal<B: AgentBackend>(
             pending.metrics,
         );
     }
-    let fresh = match observe_async(
-        backend.clone(),
-        pending.request.app.clone(),
-        pending.request.root.clone(),
-    )
-    .await
-    {
+    let fresh = match execute_pending_action(&backend, &pending).await {
         Ok(screen) => screen,
-        Err(error) => return *error,
+        Err(reply) => return reply,
     };
-    let Some(target) = current_target(&pending, &fresh) else {
-        return run_response(
-            JevStopReason::StaleTarget,
-            pending.turns,
-            Some(pending.decision),
-            pending.metrics,
-        );
-    };
-    let text = (pending.decision.operation == JevOperation::TypeText)
-        .then(|| pending.request.text.first().cloned())
-        .flatten();
-    let reply = execute_operation(
-        backend.clone(),
-        pending.decision.operation,
-        Some(target),
-        text,
-    )
-    .await;
-    if !reply.ok {
-        return action_failed_response(pending.turns, pending.decision, pending.metrics, &reply);
-    }
-    let mut turns = pending.turns;
-    let mut history = pending.history;
+    let mut turns = pending.turns.clone();
+    let mut history = pending.history.clone();
     let confirmed = JevDecision {
         executed: true,
         ..pending.decision.clone()
     };
-    let after = observe_async(
-        backend.clone(),
-        pending.request.app.clone(),
-        pending.request.root.clone(),
+    let Some(remaining) = remaining_goal_time(&pending) else {
+        record_turn(&mut turns, &mut history, &confirmed, false);
+        return run_response(
+            JevStopReason::ActionUncertain,
+            turns,
+            Some(confirmed),
+            pending.metrics,
+        );
+    };
+    let after = tokio::time::timeout(
+        remaining,
+        observe_async(
+            backend.clone(),
+            pending.request.app.clone(),
+            pending.request.root.clone(),
+        ),
     )
     .await;
-    let changed = if let Ok(after) = after {
+    let changed = if let Ok(Ok(after)) = after {
         fingerprint(&after) != fingerprint(&fresh)
     } else {
         record_turn(&mut turns, &mut history, &confirmed, false);
         return run_response(
-            JevStopReason::ActionFailed,
+            JevStopReason::ActionUncertain,
             turns,
             Some(confirmed),
             pending.metrics,
@@ -405,10 +391,20 @@ async fn continue_goal<B: AgentBackend>(
     if unchanged >= 3 {
         return run_response(JevStopReason::Stalled, turns, None, pending.metrics);
     }
+    let remaining_ms = remaining_goal_time(&pending).map_or(0, |remaining| {
+        u64::try_from(remaining.as_millis()).unwrap_or(u64::MAX)
+    });
     let mut request = pending.request;
+    request.max_elapsed_ms = remaining_ms;
+    if request.max_elapsed_ms == 0 {
+        return run_response(JevStopReason::TimeBudget, turns, None, pending.metrics);
+    }
     request.continuation = None;
     request.max_steps = request.max_steps.saturating_sub(1);
-    if pending.decision.operation == JevOperation::TypeText && !request.text.is_empty() {
+    if pending.decision.operation == JevOperation::TypeText
+        && request.text_slots.is_empty()
+        && !request.text.is_empty()
+    {
         request.text.remove(0);
     }
     if request.max_steps == 0 {
@@ -422,6 +418,85 @@ async fn continue_goal<B: AgentBackend>(
         turns,
         &pending.metrics,
     )
+}
+
+fn pending_stop(pending: &PendingRun, stop: JevStopReason) -> DesktopResponse {
+    run_response(
+        stop,
+        pending.turns.clone(),
+        Some(pending.decision.clone()),
+        pending.metrics.clone(),
+    )
+}
+
+async fn execute_pending_action<B: AgentBackend>(
+    backend: &B,
+    pending: &PendingRun,
+) -> Result<Screen, DesktopResponse> {
+    let remaining = remaining_goal_time(pending)
+        .ok_or_else(|| pending_stop(pending, JevStopReason::TimeBudget))?;
+    let fresh = match tokio::time::timeout(
+        remaining,
+        observe_async(
+            backend.clone(),
+            pending.request.app.clone(),
+            pending.request.root.clone(),
+        ),
+    )
+    .await
+    {
+        Ok(Ok(screen)) => screen,
+        Ok(Err(error)) => return Err(*error),
+        Err(_) => return Err(pending_stop(pending, JevStopReason::TimeBudget)),
+    };
+    let target = current_target(pending, &fresh)
+        .ok_or_else(|| pending_stop(pending, JevStopReason::StaleTarget))?;
+    let text = (pending.decision.operation == JevOperation::TypeText)
+        .then(|| {
+            prepared_text(&pending.request, &target)
+                .or_else(|| pending.request.text.first().cloned())
+        })
+        .flatten();
+    if pending.decision.operation == JevOperation::TypeText && text.is_none() {
+        return Err(pending_stop(pending, JevStopReason::NeedsText));
+    }
+    let remaining = remaining_goal_time(pending)
+        .ok_or_else(|| pending_stop(pending, JevStopReason::TimeBudget))?;
+    let reply = tokio::time::timeout(
+        remaining,
+        execute_operation(
+            backend.clone(),
+            pending.decision.operation,
+            Some(target),
+            text,
+        ),
+    )
+    .await;
+    let Ok(reply) = reply else {
+        let mut turns = pending.turns.clone();
+        turns.push(failed_turn(&turns, &pending.decision));
+        return Err(run_response(
+            JevStopReason::ActionUncertain,
+            turns,
+            Some(pending.decision.clone()),
+            pending.metrics.clone(),
+        ));
+    };
+    if !reply.ok {
+        return Err(action_failed_response(
+            pending.turns.clone(),
+            pending.decision.clone(),
+            pending.metrics.clone(),
+            &reply,
+        ));
+    }
+    Ok(fresh)
+}
+
+fn remaining_goal_time(pending: &PendingRun) -> Option<Duration> {
+    Duration::from_millis(pending.request.max_elapsed_ms.clamp(1, 300_000))
+        .checked_sub(pending.started.elapsed())
+        .filter(|remaining| !remaining.is_zero())
 }
 
 fn take_pending(runtime: &JevRuntime, id: &str) -> Result<PendingRun, Box<DesktopResponse>> {

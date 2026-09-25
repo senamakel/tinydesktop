@@ -89,3 +89,27 @@ fn description_matches_even_when_a_distinct_name_exists() {
     );
     assert!(satisfied(&evidence));
 }
+
+#[test]
+fn empty_exact_value_is_a_valid_cleared_field_condition() {
+    let screen = Screen {
+        app: "App".into(),
+        window: None,
+        surface: "window".into(),
+        root: None,
+        candidates: Vec::new(),
+        observed: vec![Candidate {
+            name: Some("Search".into()),
+            value: Some(json!("")),
+            ..Candidate::default()
+        }],
+    };
+    let evidence = verify(
+        &screen,
+        &[VisiblePredicate::ValueEquals {
+            name: "Search".into(),
+            value: String::new(),
+        }],
+    );
+    assert!(satisfied(&evidence));
+}

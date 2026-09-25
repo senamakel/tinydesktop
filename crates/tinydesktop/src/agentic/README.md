@@ -19,4 +19,5 @@ request's action scope.
 The result carries executed turns, provider metrics, a stop reason, and compact
 predicate evidence. The only value echoed for a value predicate is its
 caller-supplied expected string or fragment after a match; other field content
-is not returned.
+is not returned. An absence predicate is deliberately unavailable because a
+bounded accessibility snapshot cannot prove an element is absent.

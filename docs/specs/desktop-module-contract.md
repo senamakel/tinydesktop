@@ -57,7 +57,8 @@ engine's argument types, the permission preflight, and the bus surface.
   target probabilities separately, and verifies completion from the accessibility
   tree rather than accepting Jev's `DONE` alone. A task stops at 40 actions,
   80 evaluations, three unchanged turns, or its five-minute-capped elapsed budget.
-  Uncertain mutations are never replayed.
+  Uncertain mutations are never replayed. Absence is not a valid success predicate:
+  the bounded snapshot cannot prove it.
 
 ### The envelope
 

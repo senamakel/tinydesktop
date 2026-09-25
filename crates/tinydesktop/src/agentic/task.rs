@@ -93,11 +93,10 @@ fn valid_task_scope(request: &RunGoalRequest) -> bool {
             .keys()
             .any(|label| label.trim().is_empty())
         || request.success.iter().any(|predicate| match predicate {
-            VisiblePredicate::NamePresent { name } | VisiblePredicate::NameAbsent { name } => {
+            VisiblePredicate::NamePresent { name } | VisiblePredicate::ValueEquals { name, .. } => {
                 name.trim().is_empty()
             }
-            VisiblePredicate::ValueEquals { name, value }
-            | VisiblePredicate::ValueContains { name, value } => {
+            VisiblePredicate::ValueContains { name, value } => {
                 name.trim().is_empty() || value.is_empty()
             }
             VisiblePredicate::StateContains { name, state } => {
@@ -261,6 +260,7 @@ impl<B: AgentBackend> GoalLoop<B> {
             &self.runtime,
             PendingRun {
                 created: Instant::now(),
+                started: self.started,
                 request: RunGoalRequest {
                     text: self
                         .next_text

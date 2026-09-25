@@ -164,6 +164,28 @@ struct FakeBackend {
     fail_execute: bool,
 }
 
+#[derive(Clone)]
+struct RecordingTextBackend {
+    inner: FakeBackend,
+    values: Arc<Mutex<Vec<Option<String>>>>,
+}
+
+impl AgentBackend for RecordingTextBackend {
+    fn observe(&self, app: &str, root: Option<&str>) -> Result<Screen, Box<DesktopResponse>> {
+        self.inner.observe(app, root)
+    }
+
+    fn execute(
+        &self,
+        operation: JevOperation,
+        target: Option<Candidate>,
+        text: Option<String>,
+    ) -> DesktopResponse {
+        self.values.lock().unwrap().push(text.clone());
+        self.inner.execute(operation, target, text)
+    }
+}
+
 impl AgentBackend for FakeBackend {
     fn observe(&self, _app: &str, _root: Option<&str>) -> Result<Screen, Box<DesktopResponse>> {
         self.screens
@@ -658,6 +680,140 @@ async fn approved_goal_action_reobserves_then_continues_once() {
     )
     .await;
     assert_eq!(replay.error.unwrap().code, "CONFIRMATION_EXPIRED");
+}
+
+#[tokio::test]
+async fn continuation_uses_prepared_named_text_instead_of_an_empty_value() {
+    let first = evaluation(json!({
+        "model":"typesafe/jev-1.13-20260917",
+        "answers":{
+            "operation":{"type":"choice","choice":"TYPE_TEXT","confidence":0.9,
+                "probabilities":{"TYPE_TEXT":0.95,"DONE":0.03,"BLOCKED":0.02}},
+            "type_text_target":{"type":"choice","choice":"1","confidence":0.9,
+                "probabilities":{"1":0.95,"none":0.05}},
+            "destructive":{"type":"noul","noul":0.9}
+        }, "usage":{"input_tokens":10,"output_tokens":2}
+    }));
+    let runtime = runtime(vec![first, response("DONE", 0.9, "none")]);
+    let (inner, _) = backend(4);
+    for screen in inner.screens.lock().unwrap().iter_mut() {
+        screen.candidates[0].role = "text field".into();
+        screen.candidates[0].name = Some("Document".into());
+        screen.candidates[0].available_actions = vec!["SetValue".into()];
+    }
+    let values = Arc::new(Mutex::new(Vec::new()));
+    let backend = RecordingTextBackend {
+        inner,
+        values: Arc::clone(&values),
+    };
+    let stopped = run_goal_with(
+        backend.clone(),
+        runtime.clone(),
+        RunGoalRequest {
+            app: "Spotify".into(),
+            goal: "fill the document".into(),
+            text_slots: BTreeMap::from([("Document".into(), "marker".into())]),
+            ..RunGoalRequest::default()
+        },
+    )
+    .await;
+    let stopped: tinydesktop_bus::JevRunResult =
+        serde_json::from_value(stopped.data.unwrap()).unwrap();
+    assert_eq!(stopped.stop, JevStopReason::ConfirmationRequired);
+    let resumed = run_goal_with(
+        backend,
+        runtime,
+        RunGoalRequest {
+            continuation: Some(GoalContinuation {
+                id: stopped.confirmation_id.unwrap(),
+                approve: true,
+            }),
+            ..RunGoalRequest::default()
+        },
+    )
+    .await;
+    let resumed: tinydesktop_bus::JevRunResult =
+        serde_json::from_value(resumed.data.unwrap()).unwrap();
+    assert_eq!(resumed.stop, JevStopReason::Done);
+    assert_eq!(*values.lock().unwrap(), vec![Some("marker".into())]);
+}
+
+#[tokio::test]
+async fn continuation_never_replays_after_post_action_observation_is_lost() {
+    let runtime = runtime(vec![response_with("CLICK", 0.9, "1", 0.9, 0.9)]);
+    let (backend, operations) = backend(2);
+    let stopped = run_goal_with(
+        backend.clone(),
+        runtime.clone(),
+        RunGoalRequest {
+            app: "Spotify".into(),
+            goal: "send the selected item".into(),
+            ..RunGoalRequest::default()
+        },
+    )
+    .await;
+    let stopped: tinydesktop_bus::JevRunResult =
+        serde_json::from_value(stopped.data.unwrap()).unwrap();
+    let result = run_goal_with(
+        backend,
+        runtime,
+        RunGoalRequest {
+            continuation: Some(GoalContinuation {
+                id: stopped.confirmation_id.unwrap(),
+                approve: true,
+            }),
+            ..RunGoalRequest::default()
+        },
+    )
+    .await;
+    let result: tinydesktop_bus::JevRunResult =
+        serde_json::from_value(result.data.unwrap()).unwrap();
+    assert_eq!(result.stop, JevStopReason::ActionUncertain);
+    assert_eq!(result.turns.len(), 1);
+    assert!(result.turns[0].ok);
+    assert_eq!(*operations.lock().unwrap(), vec![JevOperation::Click]);
+}
+
+#[tokio::test]
+async fn confirmation_wait_consumes_the_original_elapsed_budget() {
+    let runtime = runtime(vec![response_with("CLICK", 0.9, "1", 0.9, 0.9)]);
+    let (backend, operations) = backend(1);
+    let stopped = run_goal_with(
+        backend.clone(),
+        runtime.clone(),
+        RunGoalRequest {
+            app: "Spotify".into(),
+            goal: "send the selected item".into(),
+            max_elapsed_ms: 50,
+            ..RunGoalRequest::default()
+        },
+    )
+    .await;
+    let stopped: tinydesktop_bus::JevRunResult =
+        serde_json::from_value(stopped.data.unwrap()).unwrap();
+    let id = stopped.confirmation_id.unwrap();
+    runtime
+        .pending
+        .lock()
+        .unwrap()
+        .get_mut(&id)
+        .unwrap()
+        .started = Instant::now()
+        .checked_sub(Duration::from_millis(100))
+        .unwrap();
+    let result = run_goal_with(
+        backend,
+        runtime,
+        RunGoalRequest {
+            continuation: Some(GoalContinuation { id, approve: true }),
+            ..RunGoalRequest::default()
+        },
+    )
+    .await;
+    let result: tinydesktop_bus::JevRunResult =
+        serde_json::from_value(result.data.unwrap()).unwrap();
+    assert_eq!(result.stop, JevStopReason::TimeBudget);
+    assert!(operations.lock().unwrap().is_empty());
 }
 
 #[tokio::test]

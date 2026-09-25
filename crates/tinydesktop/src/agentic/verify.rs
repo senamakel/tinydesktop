@@ -43,7 +43,6 @@ pub(super) fn satisfied(observation: &JevObservation) -> bool {
 fn verify_one(candidates: &[Candidate], predicate: &VisiblePredicate) -> JevPredicateResult {
     let name = match predicate {
         VisiblePredicate::NamePresent { name }
-        | VisiblePredicate::NameAbsent { name }
         | VisiblePredicate::ValueEquals { name, .. }
         | VisiblePredicate::ValueContains { name, .. }
         | VisiblePredicate::StateContains { name, .. } => name,
@@ -55,7 +54,6 @@ fn verify_one(candidates: &[Candidate], predicate: &VisiblePredicate) -> JevPred
     let unique = (candidates_with_name.len() == 1).then(|| candidates_with_name[0]);
     let matched = match predicate {
         VisiblePredicate::NamePresent { .. } => !candidates_with_name.is_empty(),
-        VisiblePredicate::NameAbsent { .. } => candidates_with_name.is_empty(),
         VisiblePredicate::ValueEquals { value, .. } => unique.is_some_and(|candidate| {
             candidate.value.as_ref().and_then(serde_json::Value::as_str) == Some(value.as_str())
         }),
