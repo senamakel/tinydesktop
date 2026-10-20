@@ -31,8 +31,11 @@ payload vocabulary has to be published as an ordinary library. This is it.
 | `flow`          | the flow grammar `RunFlow` and `StartTask` carry                    |
 | `browser`       | the `Browser…` members' payloads, names, and error codes            |
 | `version`       | `CONTRACT_VERSION` and the bind rule a host applies to it           |
+| `config`        | the typed load-time configuration shared by hosts and the module    |
+| `sites`         | canonical, strict HTTP(S) site-name normalization                   |
 
-Three dependencies, all pure Rust: `thiserror`, `serde`, and `serde_json`.
+Four dependencies, all pure Rust: `thiserror`, `serde`, `serde_json`, and
+`url`. The URL parser is used only for shared, IDNA-aware site normalization.
 
 ## This crate sits underneath `tinycomputer`
 

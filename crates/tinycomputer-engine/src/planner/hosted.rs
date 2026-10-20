@@ -20,7 +20,10 @@ use tinyinference_llm::{
     classify_provider_failure,
 };
 
-use super::config::{ModelRoute, OUTPUT_MODEL, PLANNER_MODEL, PlannerConfig, RESCUE_MODEL};
+use super::config::{
+    ModelRoute, OUTPUT_MODEL, PLANNER_MODEL, PlannerConfig, RESCUE_MODEL, describe_route,
+    resolve_route,
+};
 use super::{Completion, LanguageModel, Planner, Role, Turn};
 use crate::rescue::Rescuer;
 use crate::shape::Shaper;
@@ -41,7 +44,7 @@ pub fn open_router(config: &PlannerConfig) -> Result<Planner, String> {
         reasoning: None,
         max_tokens: 4_000,
     }))
-    .with_configuration(config.route.describe(&model)))
+    .with_configuration(describe_route(&config.route, &model)))
 }
 
 /// A [`Rescuer`] configured by `config`: the `rescue_model` (or
@@ -63,7 +66,7 @@ pub fn open_router_rescuer(config: &PlannerConfig) -> Result<Rescuer, String> {
         reasoning: Some(ReasoningEffort::Low),
         max_tokens: 8_000,
     }))
-    .with_configuration(route.describe(&model)))
+    .with_configuration(describe_route(route, &model)))
 }
 
 /// A [`Shaper`] configured by `config`: the `output_model` (or
@@ -85,7 +88,7 @@ pub fn open_router_shaper(config: &PlannerConfig) -> Result<Shaper, String> {
         // Room for a result built from many records.
         max_tokens: 16_000,
     }))
-    .with_configuration(config.route.describe(&model)))
+    .with_configuration(describe_route(&config.route, &model)))
 }
 
 /// `configured`, unless absent or blank, else `default`.
@@ -98,7 +101,7 @@ fn model_name(configured: Option<&String>, default: &str) -> String {
 
 /// The OpenAI-compatible client for `model` on `route`.
 pub(super) fn chat_model(route: &ModelRoute, model: &str) -> Result<Arc<OpenAiModel>, String> {
-    let resolved = route.resolve()?;
+    let resolved = resolve_route(route)?;
     let kind = match resolved.provider {
         LanguageModelProvider::OpenRouter => ProviderKind::OpenRouter,
         LanguageModelProvider::TinyHumans => ProviderKind::TinyHumans,

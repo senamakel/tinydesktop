@@ -150,10 +150,32 @@ them. They apply to a browser the module launches, not one it attaches to.
   those may be flattened into the message.
 - The envelope's wire form is byte-identical to the `agent-desktop` CLI's stdout
   envelope, version `2.5`, so a host needs one parser rather than two.
+- `DesktopResponse::into_data` checks `ENVELOPE_VERSION`, requires exactly one
+  consistent outcome (`ok` plus data, or not-ok plus error), and then decodes
+  the result. An inconsistent envelope never returns its data.
+- Agent members use `AgentResponse`, whose `version` is
+  `AGENT_ENVELOPE_VERSION`. `AgentResponse::into_data` applies the same version
+  and outcome checks before returning the typed value. Every module producer
+  uses the versioned constructor, including errors.
+
+### Module configuration and shared site names (2.21)
+
+- `tinycomputer_bus::config::ComputerConfig` is the typed serde contract for
+  host-supplied `jev`, `planner`, `browser`, and `trace_path` settings. Planner
+  wire types live here too and are re-exported by the engine; credentials are
+  redacted by `Debug` and the module receives them only through confidential
+  module configuration.
+- The module retains its existing loader-only extensions `session_id`,
+  `trace_strict`, `headed`, and `cursor`. They remain outside the shared host
+  config; the module adapter forwards them to their existing owners.
+- `tinycomputer_bus::sites::{site_of, site_named}` own the shared strict site
+  normalization used for site-memory keys and file names. URL parsing keeps
+  the WHATWG parser's IDNA and IP behavior; names reject adjacent dots and
+  names longer than 253 bytes.
 
 ### The contract crate
 
-- `tinycomputer-bus` depends on `thiserror`, `serde`, and `serde_json`. It may
+- `tinycomputer-bus` depends on `thiserror`, `serde`, `serde_json`, and `url`. It may
   not depend on a transport, an async runtime, an HTTP client, a native library,
   or the engine. CI asserts the resolved dependency tree.
 - It mirrors the engine's enumerations by wire form rather than importing them,
