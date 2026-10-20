@@ -7,6 +7,9 @@ use super::*;
 use std::sync::{Arc, atomic::Ordering};
 use tinycomputer_bus::accessibility::PermissionState;
 
+#[cfg(not(target_os = "macos"))]
+use std::sync::atomic::AtomicBool;
+
 use super::fixture::Fixture;
 
 #[test]
