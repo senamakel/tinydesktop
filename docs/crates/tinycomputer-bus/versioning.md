@@ -9,7 +9,7 @@ code, so this page exists mostly to keep them apart.
 ## `CONTRACT_VERSION`: does this host understand this module
 
 ```rust,ignore
-pub const CONTRACT_VERSION: (u32, u32) = (2, 19);
+pub const CONTRACT_VERSION: (u32, u32) = (2, 21);
 ```
 
 This describes the *vocabulary*: the member set and the payload shapes,
@@ -24,6 +24,11 @@ bumping it is fixed:
 - **Major bump**: a payload's wire form changed incompatibly, or a member
   was removed or renamed. A host built against the old major version can no
   longer assume it is talking to something it understands.
+
+Contract 2.21 publishes the typed `ComputerConfig`, shared strict site-name
+normalization, and versioned consistency-checked extraction for desktop and
+Agent responses. The Agent reply gains its own `version` field; this is separate
+from `ENVELOPE_VERSION`, which tracks the desktop response envelope.
 
 ### The bind rule
 
@@ -45,15 +50,15 @@ Two conditions, both necessary:
    relies on changed shape or disappeared, so a mismatched major is refused
    outright, in either direction.
 2. **The module must be at least as new, minor-wise, as the host.** A host
-   built against `(2, 19)` expects at least the members and fields that
-   existed at `(2, 19)`. A module reporting `(2, 11)` might be missing one of
-   them, so it is rejected. A module reporting `(2, 19)` has everything the
+   built against `(2, 21)` expects at least the members and fields that
+   existed at `(2, 21)`. A module reporting `(2, 11)` might be missing one of
+   them, so it is rejected. A module reporting `(2, 21)` has everything the
    host expects, plus something newer the host simply does not use yet, so
    it is accepted.
 
 ```rust,ignore
-assert!(is_compatible(CONTRACT_VERSION));   // (2, 19), the exact version this crate ships
-assert!(is_compatible((2, 19)));            // a newer, still-compatible module
+assert!(is_compatible(CONTRACT_VERSION));   // (2, 21), the exact version this crate ships
+assert!(is_compatible((2, 21)));            // a newer, still-compatible module
 assert!(!is_compatible((2, 11)));            // an older module, missing something
 assert!(!is_compatible((1, 10)));           // a different major, all bets off
 ```
@@ -86,6 +91,11 @@ whether the reply envelope's own shape changed, and vice versa. Do not read
 one as implying anything about the other; check the crate's changelog or the
 git history of `crates/tinycomputer-bus/src/envelope/` and
 `crates/tinycomputer-bus/src/version/` for what actually happened.
+
+The Agent interface has a separate `AGENT_ENVELOPE_VERSION`, carried by every
+`AgentResponse`. `DesktopResponse::into_data` and `AgentResponse::into_data`
+check their respective version and require exactly one consistent outcome
+(data on success, structured error on failure) before returning a value.
 
 ## No members ever silently disappear
 

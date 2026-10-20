@@ -7,6 +7,7 @@
 //! request.
 
 use tinycomputer_browser::{CursorPace, Perception, ScreenCursor, SessionOptions, Settle};
+use tinycomputer_bus::config::{BrowserConfig, BrowserPerception, BrowserSettle};
 
 use crate::Result;
 
@@ -45,74 +46,25 @@ impl Default for BrowserDefaults {
 }
 
 impl BrowserDefaults {
-    /// Reads the optional `browser` object: `executable` and `user_agent`
-    /// strings, `args` an array of strings, `perception` either `sight` or
-    /// `tree`, `settle` either `prompt` or `steady`, and `prelaunch` a
-    /// boolean.
-    ///
-    /// # Errors
-    ///
-    /// [`crate::Error::ConfigFieldType`] when `browser` or any of its fields
-    /// has the wrong shape; an unknown field is refused too, so a misspelt
-    /// setting cannot be silently ignored.
-    pub(crate) fn from_config(config: &serde_json::Value) -> Result<Self> {
-        let Some(browser) = config.as_object().and_then(|object| object.get("browser")) else {
-            return Ok(Self::default());
+    /// Applies the browser defaults decoded from the public module config.
+    pub(crate) fn from_config(config: Option<&BrowserConfig>) -> Self {
+        let Some(config) = config else {
+            return Self::default();
         };
-        let invalid = || crate::Error::ConfigFieldType {
-            field: "browser",
-            expected: "an object with optional `executable` and `user_agent` strings, an `args` \
-                       array of strings, a `perception` of sight or tree, a `settle` of \
-                       prompt or steady, and a `prelaunch` boolean",
-        };
-        let browser = browser.as_object().ok_or_else(invalid)?;
-        let text = |name: &str| match browser.get(name) {
-            None => Ok(None),
-            Some(serde_json::Value::String(value)) => Ok(Some(value.clone())),
-            Some(_) => Err(invalid()),
-        };
-        let mut defaults = Self {
-            executable: text("executable")?,
-            user_agent: text("user_agent")?,
-            ..Self::default()
-        };
-        if let Some(args) = browser.get("args") {
-            defaults.args = args
-                .as_array()
-                .ok_or_else(invalid)?
-                .iter()
-                .map(|arg| arg.as_str().map(str::to_owned).ok_or_else(invalid))
-                .collect::<Result<_>>()?;
+        Self {
+            executable: config.executable.clone(),
+            user_agent: config.user_agent.clone(),
+            args: config.args.clone(),
+            perception: match config.perception {
+                BrowserPerception::Sight => Perception::Sight,
+                BrowserPerception::Tree => Perception::Tree,
+            },
+            settle: match config.settle {
+                BrowserSettle::Prompt => Settle::Prompt,
+                BrowserSettle::Steady => Settle::Steady,
+            },
+            prelaunch: config.prelaunch,
         }
-        defaults.perception = match text("perception")?.as_deref() {
-            None | Some("sight") => Perception::Sight,
-            Some("tree") => Perception::Tree,
-            Some(_) => return Err(invalid()),
-        };
-        defaults.settle = match text("settle")?.as_deref() {
-            None | Some("prompt") => Settle::Prompt,
-            Some("steady") => Settle::Steady,
-            Some(_) => return Err(invalid()),
-        };
-        defaults.prelaunch = match browser.get("prelaunch") {
-            None => true,
-            Some(serde_json::Value::Bool(prelaunch)) => *prelaunch,
-            Some(_) => return Err(invalid()),
-        };
-        if browser.keys().any(|key| {
-            ![
-                "executable",
-                "user_agent",
-                "args",
-                "perception",
-                "settle",
-                "prelaunch",
-            ]
-            .contains(&key.as_str())
-        }) {
-            return Err(invalid());
-        }
-        Ok(defaults)
     }
 
     /// `options` with these defaults filled in where the caller left them

@@ -4,6 +4,12 @@
 use crate::tinybus_module::DesktopService;
 use serde_json::json;
 use tinycomputer_bus::DesktopResponse;
+use tinycomputer_bus::config::ComputerConfig;
+
+fn browser_defaults(config: serde_json::Value) -> crate::tinybus_module::config::BrowserDefaults {
+    let config: ComputerConfig = serde_json::from_value(config).expect("typed computer config");
+    crate::tinybus_module::config::BrowserDefaults::from_config(config.browser.as_ref())
+}
 
 #[test]
 fn a_malformed_configuration_is_rejected_rather_than_defaulted() {
@@ -155,20 +161,16 @@ fn the_browser_configuration_is_read_or_refused() {
     use crate::tinybus_module::config::BrowserDefaults;
     use tinycomputer_browser::{Perception, Settle};
 
-    assert_eq!(
-        BrowserDefaults::from_config(&json!({})).unwrap(),
-        BrowserDefaults::default()
-    );
+    assert_eq!(browser_defaults(json!({})), BrowserDefaults::default());
     assert!(DesktopService::from_config(&json!({"browser": {}})).is_ok());
-    let defaults = BrowserDefaults::from_config(&json!({"browser": {
+    let defaults = browser_defaults(json!({"browser": {
         "executable": "/usr/bin/chromium",
         "user_agent": "Mozilla/5.0",
         "args": ["--disable-blink-features=AutomationControlled"],
         "perception": "tree",
         "settle": "steady",
         "prelaunch": false
-    }}))
-    .unwrap();
+    }}));
     assert_eq!(defaults.executable.as_deref(), Some("/usr/bin/chromium"));
     assert_eq!(defaults.user_agent.as_deref(), Some("Mozilla/5.0"));
     assert_eq!(defaults.args.len(), 1);
@@ -180,11 +182,10 @@ fn the_browser_configuration_is_read_or_refused() {
     let unset = BrowserDefaults::default();
     assert_eq!(unset.settle, Settle::Prompt);
     assert!(unset.prelaunch);
-    let asked = BrowserDefaults::from_config(&json!({"browser": {
+    let asked = browser_defaults(json!({"browser": {
         "settle": "prompt",
         "prelaunch": true
-    }}))
-    .unwrap();
+    }}));
     assert_eq!(asked, unset);
     for invalid in [
         json!({"browser": "chrome"}),
@@ -197,20 +198,21 @@ fn the_browser_configuration_is_read_or_refused() {
         json!({"browser": {"prelaunch": "yes"}}),
         json!({"browser": {"useragent": "typo"}}),
     ] {
-        assert!(BrowserDefaults::from_config(&invalid).is_err(), "{invalid}");
+        assert!(
+            serde_json::from_value::<ComputerConfig>(invalid.clone()).is_err(),
+            "{invalid}"
+        );
         assert!(DesktopService::from_config(&invalid).is_err(), "{invalid}");
     }
 }
 
 #[test]
 fn browser_defaults_fill_only_what_the_caller_left_unset() {
-    use crate::tinybus_module::config::BrowserDefaults;
     use tinycomputer_browser::SessionOptions;
 
-    let defaults = BrowserDefaults::from_config(&json!({"browser": {
+    let defaults = browser_defaults(json!({"browser": {
         "executable": "/opt/chromium", "user_agent": "UA", "args": ["--a"]
-    }}))
-    .unwrap();
+    }}));
     let launched = defaults.apply(SessionOptions::default());
     assert_eq!(launched.executable.as_deref(), Some("/opt/chromium"));
     assert_eq!(launched.user_agent.as_deref(), Some("UA"));

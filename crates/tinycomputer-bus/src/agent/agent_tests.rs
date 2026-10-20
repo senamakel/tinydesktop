@@ -10,8 +10,9 @@ use std::collections::BTreeMap;
 use serde_json::json;
 
 use super::{
-    AgentError, AgentResponse, AwaitTaskRequest, ContinueTaskRequest, InputField, InputKind,
-    PaymentMode, StartTaskRequest, SurfaceKind, TaskId, TaskReportRequest, TaskStatus, TaskView,
+    AGENT_ENVELOPE_VERSION, AgentError, AgentResponse, AwaitTaskRequest, ContinueTaskRequest,
+    InputField, InputKind, PaymentMode, StartTaskRequest, SurfaceKind, TaskId, TaskReportRequest,
+    TaskStatus, TaskView,
 };
 
 #[test]
@@ -225,6 +226,7 @@ fn replies_carry_data_or_an_actionable_error() {
         next: vec!["AwaitTask".to_owned()],
     };
     let ok = serde_json::to_value(AgentResponse::ok(view)).unwrap();
+    assert_eq!(ok["version"], AGENT_ENVELOPE_VERSION);
     assert_eq!(ok["ok"], true);
     assert!(ok.get("error").is_none());
     assert!(ok["data"].get("step").is_none());

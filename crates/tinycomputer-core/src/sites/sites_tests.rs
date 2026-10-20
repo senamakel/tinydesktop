@@ -65,6 +65,26 @@ fn a_site_is_its_host_without_www() {
 }
 
 #[test]
+fn site_names_reject_adjacent_dots() {
+    assert_eq!(site_named("a..b"), None);
+}
+
+#[test]
+fn site_names_reject_overlong_file_stems() {
+    assert_eq!(site_named(&"a".repeat(254)), None);
+}
+
+#[test]
+fn site_urls_keep_url_parser_idna_and_ip_address_behavior() {
+    assert_eq!(
+        site_of("https://www.bücher.example/").as_deref(),
+        Some("xn--bcher-kva.example")
+    );
+    assert_eq!(site_of("https://[::1]/"), None);
+    assert_eq!(site_named("bücher.example"), None);
+}
+
+#[test]
 fn goals_are_matched_whatever_their_case_and_spacing() {
     assert_eq!(
         goal_key("  Order   MILK\non shop.test "),

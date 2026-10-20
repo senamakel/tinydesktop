@@ -52,20 +52,19 @@ against a scripted engine, so no browser is launched.
 
 ## Configuration
 
-The module takes its configuration from the loader as a JSON object, parsed into
-`Desktop` by `Desktop::from_config`: `session_id` and `trace_path` as strings,
-`trace_strict` and `headed` as booleans. `browser` sets how every browser
-launches — `executable`, `user_agent`, `args`, a task's page
-`perception`, how a page `settle`s after an action, and whether to
-`prelaunch` a planned browser task's browser (a planned task also warms
-the `jev` runtime's connections meanwhile) — and `cursor` sets the
-agent's on-screen cursor: a pace (`off`, `brisk`, `natural`, `calm`) or
-`{pace, overlay}` with the overlay
-helper's path. An optional `jev` object configures the
-provider, model, endpoint, and API key before the service is registered.
-TinyBus treats initial and replacement module configuration as sensitive
-host-control traffic. An unreadable configuration fails before replacing the
-served object rather than falling back to defaults.
+The host-visible loader fields are decoded as
+`tinycomputer_bus::config::ComputerConfig`: optional `jev`, `planner`,
+`browser`, and `trace_path`. The planner's route types are the same public
+types used by the engine. The module adapter converts `trace_path` into
+`Desktop` settings and applies the typed browser defaults.
+
+Module-only legacy options remain outside this host contract: `session_id`,
+`trace_strict`, and `headed` still configure `Desktop`, while `cursor` sets the
+agent's on-screen cursor (a pace of `off`, `brisk`, `natural`, or `calm`, or
+`{pace, overlay}`). The module keeps accepting these fields from existing
+loader configurations. An unreadable option fails before replacing the served
+object rather than falling back to defaults. TinyBus treats initial and
+replacement module configuration as sensitive host-control traffic.
 
 ## The manifest
 

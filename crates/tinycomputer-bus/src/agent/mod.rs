@@ -51,11 +51,11 @@ pub mod names;
 mod types;
 
 pub use types::{
-    AgentError, AgentResponse, AwaitTaskRequest, Capabilities, ContinueTaskRequest, Example,
-    InputField, InputKind, LanguageModelConfiguration, LanguageModelProvider, MemberDoc,
-    PaymentMode, PlanTaskRequest, Rescue, RescueOutcome, StartTaskRequest, StepView,
-    SurfaceAvailability, SurfaceKind, TaskBudget, TaskConstraints, TaskId, TaskOutput, TaskPlan,
-    TaskRef, TaskReport, TaskReportRequest, TaskStatus, TaskView,
+    AGENT_ENVELOPE_VERSION, AgentError, AgentResponse, AgentResponseError, AwaitTaskRequest,
+    Capabilities, ContinueTaskRequest, Example, InputField, InputKind, LanguageModelConfiguration,
+    LanguageModelProvider, MemberDoc, PaymentMode, PlanTaskRequest, Rescue, RescueOutcome,
+    StartTaskRequest, StepView, SurfaceAvailability, SurfaceKind, TaskBudget, TaskConstraints,
+    TaskId, TaskOutput, TaskPlan, TaskRef, TaskReport, TaskReportRequest, TaskStatus, TaskView,
 };
 
 #[cfg(test)]
