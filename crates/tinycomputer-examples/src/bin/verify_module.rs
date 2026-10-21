@@ -7,13 +7,103 @@
 
 use std::io;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 
 use tinybus::Connection;
 use tinybus::broker::Broker;
-use tinybus::module::ModuleHost;
+use tinybus::module::{
+    AccessFuture, FailureReport, FailureReporter, FailureSink, ModuleAccess, ModuleHost,
+    ProxyFailure, ReconfigurableModule, ReconfigureFailure, ReleaseRecord,
+};
 use tinybus::transport::memory::MemoryBus;
+use tinycomputer_bus::config::ComputerConfig;
 use tinycomputer_bus::{DesktopResponse, METHODS, names};
+use tinycomputer_client::ComputerClient;
+
+static TINYCOMPUTER_RELEASE: ReleaseRecord = ReleaseRecord {
+    id: "tinycomputer",
+    bus_name: names::INTERFACE,
+    object_path: names::OBJECT_PATH,
+    version: "0.16.0",
+    release_url: "https://example.invalid/tinycomputer",
+    assets: &[],
+};
+
+#[derive(Default)]
+struct SilentFailureSink;
+
+impl FailureSink for SilentFailureSink {
+    fn capture(&self, _report: &FailureReport<'_>) {}
+}
+
+struct LoadedModuleAccess {
+    bus: MemoryBus,
+    host: Arc<ModuleHost>,
+    reporter: FailureReporter,
+}
+
+impl ModuleAccess for LoadedModuleAccess {
+    fn find(&self, id: &str) -> Option<&'static ReleaseRecord> {
+        (id == TINYCOMPUTER_RELEASE.id).then_some(&TINYCOMPUTER_RELEASE)
+    }
+
+    fn enabled(&self) -> bool {
+        true
+    }
+
+    fn reporter(&self) -> &FailureReporter {
+        &self.reporter
+    }
+
+    fn ensure_loaded<'a>(&'a self, id: &'a str) -> AccessFuture<'a, Result<(), String>> {
+        let Some(record) = self.find(id) else {
+            return Box::pin(
+                async move { Err(format!("module `{id}` is not in the release table")) },
+            );
+        };
+        let bus_name = record.bus_name;
+        Box::pin(async move {
+            self.host
+                .ensure_ready(bus_name)
+                .await
+                .map_err(|error| error.to_string())
+        })
+    }
+
+    fn proxy<'a>(
+        &'a self,
+        bus_name: &'a str,
+        object_path: &'a str,
+    ) -> AccessFuture<'a, Result<tinybus::Proxy, ProxyFailure>> {
+        let bus = self.bus.clone();
+        let bus_name = bus_name.to_owned();
+        let object_path = object_path.to_owned();
+        Box::pin(async move {
+            let transport = bus.connect().await.map_err(|_| ProxyFailure::Transport)?;
+            let connection = Connection::connect(transport)
+                .await
+                .map_err(|_| ProxyFailure::Transport)?;
+            connection
+                .proxy(&bus_name, &object_path, &bus_name)
+                .map_err(|_| ProxyFailure::Contract)
+        })
+    }
+
+    fn reinitialize<'a>(
+        &'a self,
+        id: &'a str,
+        config: serde_json::Value,
+    ) -> AccessFuture<'a, Result<(), ReconfigureFailure>> {
+        Box::pin(async move {
+            self.host
+                .reinitialize(id, config)
+                .await
+                .map(|_| ())
+                .map_err(|_| ReconfigureFailure::Failed)
+        })
+    }
+}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -21,8 +111,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let bus = MemoryBus::new();
     let broker = Broker::new();
     let broker_task = broker.spawn(bus.clone());
-    let module_host = ModuleHost::new(broker);
-    let info = module_host.load_file(&module)?;
+    let module_host = Arc::new(ModuleHost::new(broker));
+    let client_config = ComputerConfig::default();
+    let info = module_host.load_file_with_config(&module, serde_json::to_value(&client_config)?)?;
 
     if info.name != "tinycomputer" {
         return Err(io::Error::other(format!(
@@ -58,6 +149,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         ))
         .into());
     }
+    verify_typed_client(&bus, &module_host, &client_config).await?;
 
     let declared: Vec<&str> = info
         .manifest
@@ -95,6 +187,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         METHODS.len()
     );
     broker_task.abort();
+    Ok(())
+}
+
+async fn verify_typed_client(
+    bus: &MemoryBus,
+    host: &Arc<ModuleHost>,
+    config: &ComputerConfig,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let client = ComputerClient::new(ReconfigurableModule::new(
+        LoadedModuleAccess {
+            bus: bus.clone(),
+            host: Arc::clone(host),
+            reporter: FailureReporter::new(Arc::new(SilentFailureSink)),
+        },
+        TINYCOMPUTER_RELEASE.id,
+    ));
+    client.record_loaded_with(config)?;
+    let capabilities = client.describe(config).await?;
+    if capabilities.contract_version != tinycomputer_bus::CONTRACT_VERSION {
+        return Err(io::Error::other("typed client Describe contract version mismatch").into());
+    }
     Ok(())
 }
 
