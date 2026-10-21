@@ -52,5 +52,9 @@ unknown-git = "deny"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
 # The lab's optional LLM author (`tinycomputer-examples`, feature `inference`)
 # takes `vendor/tinyinference`, which pins the organisation's own `tinytools`
-# by exact git revision. Nothing the shipped module links comes from here.
-allow-git = ["https://github.com/tinyhumansai/tinytools"]
+# by exact git revision. Browser's websocket transport is pinned to an immutable
+# revision of its upstream source to carry the compatible webpki-roots patch.
+allow-git = [
+    "https://github.com/tinyhumansai/tinytools",
+    "https://github.com/snapview/tokio-tungstenite",
+]

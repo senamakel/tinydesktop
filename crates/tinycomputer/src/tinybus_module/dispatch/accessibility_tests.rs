@@ -14,12 +14,20 @@ use super::fixture::Fixture;
 
 #[test]
 fn thread_restore_worker_reports_completion_and_joins_once() {
-    let (finished, observed) = std::sync::mpsc::channel();
-    let thread = std::thread::spawn(move || finished.send(()).expect("signal completion"));
-    observed.recv().expect("worker finished");
+    let (started, observed_start) = std::sync::mpsc::channel();
+    let (release, wait_for_release) = std::sync::mpsc::channel();
+    let thread = std::thread::spawn(move || {
+        started.send(()).expect("signal worker started");
+        wait_for_release.recv().expect("release worker to finish");
+    });
+    observed_start.recv().expect("worker started");
     let mut worker = ThreadRestoreWorker(Some(thread));
 
-    assert!(worker.is_finished());
+    assert!(
+        !worker.is_finished(),
+        "a completion signal before thread exit is not a finished worker"
+    );
+    release.send(()).expect("release worker to finish");
     worker.join().expect("join completed worker");
     assert!(worker.is_finished());
     worker.join().expect("joining an empty worker is harmless");
