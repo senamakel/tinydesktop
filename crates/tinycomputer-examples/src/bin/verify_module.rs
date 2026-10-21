@@ -67,7 +67,7 @@ impl ModuleAccess for LoadedModuleAccess {
             self.host
                 .ensure_ready(bus_name)
                 .await
-                .map(|_| ())
+                .map(|()| ())
                 .map_err(|error| error.to_string())
         })
     }

@@ -2,7 +2,7 @@
 //!
 //! [`ComputerClient`] owns no desktop or browser implementation. It takes the
 //! contract's request and response types, coordinates each call with the
-//! module's current [`ComputerConfig`], and applies the contract catalogue's
+//! module's current [`ComputerConfig`](tinycomputer_bus::config::ComputerConfig), and applies the contract catalogue's
 //! confidential-delivery rules before sending a frame.
 //!
 //! # Example
