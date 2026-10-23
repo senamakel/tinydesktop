@@ -24,8 +24,14 @@ async fn loaded_module_consumes_public_socket_before_fixture_mapping() -> tinybu
             TcpStream::connect(fixture_address).await
         }) as Pin<Box<dyn Future<Output = io::Result<TcpStream>> + Send>>
     });
-    let _connector_guard = crate::test_support::install_browser_egress_connector(connector)
-        .expect("fixture connector installs once");
+    let policy_id = "fixture-public-control";
+    let generation = 973;
+    let _connector_guard = crate::test_support::install_browser_egress_connector(
+        policy_id.into(),
+        generation,
+        connector,
+    )
+    .expect("fixture connector installs once");
 
     let body = b"<!doctype html><link rel=\"icon\" href=\"data:,\"><title>public fixture</title>";
     let extra_connections = Arc::new(AtomicUsize::new(0));
@@ -37,38 +43,37 @@ async fn loaded_module_consumes_public_socket_before_fixture_mapping() -> tinybu
         served_tx,
         None,
     ));
-    let browser = start_browser_with_fixture_host(
-        public_socket.to_string(),
+    let browser = start_browser_with_fixture_hosts_for_policy(
+        vec![public_socket.to_string()],
         page_port,
         "/public-control",
         served_rx,
+        policy_id,
+        generation,
+        Some(calls.clone()),
     )
     .await?;
 
-    let expected_authorize = format!("authorize:fixture-policy:41:fixture.test:{page_port}");
+    assert_eq!(browser.navigation["title"], "public fixture");
+    let expected_authorize = format!("authorize:{policy_id}:{generation}:fixture.test:{page_port}");
     let expected_consume = format!("consume:{public_socket}");
     let observed = browser.observations.lock().unwrap().clone();
     assert!(observed.iter().any(|call| call == &expected_authorize));
     assert!(observed.iter().any(|call| call == &expected_consume));
+    let observed_calls = calls.lock().unwrap().clone();
     assert_eq!(
-        calls.lock().unwrap().as_slice(),
-        [format!("connect:{public_socket}")],
-        "the connector receives precisely the socket consumed through the TinyBus authorizer"
+        &observed_calls[..3],
+        [
+            expected_authorize,
+            expected_consume,
+            format!("connect:{public_socket}"),
+        ],
+        "the exact TinyBus-consumed socket is passed to the fixture connector after authorization"
     );
     assert!(
-        browser
-            .observations
-            .lock()
-            .unwrap()
+        observed_calls[3..]
             .iter()
-            .position(|call| call == &expected_consume)
-            < browser
-                .observations
-                .lock()
-                .unwrap()
-                .iter()
-                .position(|call| call.starts_with("validate:")),
-        "the TinyBus host consumed the grant before proxy lease validation and forwarding"
+            .all(|call| call.starts_with("validate:"))
     );
 
     let closed: DesktopResponse = browser

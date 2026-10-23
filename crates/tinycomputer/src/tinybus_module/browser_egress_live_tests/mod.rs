@@ -147,6 +147,7 @@ fn successful_data(reply: &DesktopResponse) -> &serde_json::Value {
 struct LiveBrowser {
     proxy: tinybus::Proxy,
     session: serde_json::Value,
+    navigation: serde_json::Value,
     allowed: Arc<AtomicBool>,
     observations: Arc<Mutex<Vec<String>>>,
     broker_task: tokio::task::JoinHandle<tinybus::Result<()>>,
@@ -160,7 +161,16 @@ async fn start_browser_with_fixture_host(
     page_path: &str,
     served: tokio::sync::oneshot::Receiver<()>,
 ) -> tinybus::Result<LiveBrowser> {
-    start_browser_with_fixture_hosts(vec![allowed_address], page_port, page_path, served).await
+    start_browser_with_fixture_hosts_for_policy(
+        vec![allowed_address],
+        page_port,
+        page_path,
+        served,
+        "fixture-policy",
+        41,
+        None,
+    )
+    .await
 }
 
 async fn start_browser_with_fixture_hosts(
@@ -169,12 +179,33 @@ async fn start_browser_with_fixture_hosts(
     page_path: &str,
     served: tokio::sync::oneshot::Receiver<()>,
 ) -> tinybus::Result<LiveBrowser> {
+    start_browser_with_fixture_hosts_for_policy(
+        allowed_addresses,
+        page_port,
+        page_path,
+        served,
+        "fixture-policy",
+        41,
+        None,
+    )
+    .await
+}
+
+async fn start_browser_with_fixture_hosts_for_policy(
+    allowed_addresses: Vec<String>,
+    page_port: u16,
+    page_path: &str,
+    served: tokio::sync::oneshot::Receiver<()>,
+    policy_id: &str,
+    generation: u64,
+    shared_observations: Option<Arc<Mutex<Vec<String>>>>,
+) -> tinybus::Result<LiveBrowser> {
     let bus = MemoryBus::new();
     let broker = Broker::new();
     let broker_task = broker.spawn(bus.clone());
     let host_connection = Connection::connect(bus.connect().await?).await?;
     let allowed = Arc::new(AtomicBool::new(true));
-    let observations = Arc::new(Mutex::new(Vec::new()));
+    let observations = shared_observations.unwrap_or_else(|| Arc::new(Mutex::new(Vec::new())));
     host_connection
         .serve_at(
             browser_egress::OBJECT_PATH.try_into()?,
@@ -196,7 +227,7 @@ async fn start_browser_with_fixture_hosts(
         .attach_linked_with_config(
             module,
             serde_json::json!({
-                "browser": {"egress": {"policy_id": "fixture-policy", "generation": 41}}
+                "browser": {"egress": {"policy_id": policy_id, "generation": generation}}
             }),
         )
         .expect("TinyComputer module loads through ModuleHost");
@@ -223,6 +254,7 @@ async fn start_browser_with_fixture_hosts(
         "authorized fixture navigation failed: {:?}",
         navigated.error
     );
+    let navigation = successful_data(&navigated).clone();
     tokio::time::timeout(Duration::from_secs(10), served)
         .await
         .expect("fixture page is served")
@@ -231,6 +263,7 @@ async fn start_browser_with_fixture_hosts(
     Ok(LiveBrowser {
         proxy,
         session,
+        navigation,
         allowed,
         observations,
         broker_task,
