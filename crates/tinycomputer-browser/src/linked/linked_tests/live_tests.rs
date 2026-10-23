@@ -69,7 +69,7 @@ async fn live_chromium_loopback_navigation_uses_the_authenticated_session_proxy(
 #[tokio::test]
 #[cfg(live_browser_tests)]
 async fn live_chromium_dials_only_the_exact_host_authorized_socket() {
-    let allowed = TcpListener::bind("127.0.0.2:0").await.unwrap();
+    let allowed = TcpListener::bind("[::1]:0").await.unwrap();
     let allowed_address = allowed.local_addr().unwrap();
     let denied = std::net::TcpListener::bind(("127.0.0.1", allowed_address.port())).unwrap();
     denied.set_nonblocking(true).unwrap();
@@ -630,19 +630,25 @@ impl EgressAuthorizer for RebindingAuthorizer {
         &self,
         target: BrowserDialTarget,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = io::Result<DialGrant>> + Send>> {
-        let attempt = self.authorizations.fetch_add(1, Ordering::SeqCst);
+        let controlled_target =
+            target.hostname == "fixture.test" && target.port == self.allowed_address.port();
+        let attempt = if controlled_target {
+            self.authorizations.fetch_add(1, Ordering::SeqCst)
+        } else {
+            usize::MAX
+        };
         let resolved_address = if attempt == 0 {
             self.allowed_address
         } else {
             self.private_address
         };
-        self.observed_addresses
-            .lock()
-            .unwrap()
-            .push(resolved_address);
-        let allowed = attempt == 0
-            && target.hostname == "fixture.test"
-            && target.port == self.allowed_address.port();
+        if controlled_target {
+            self.observed_addresses
+                .lock()
+                .unwrap()
+                .push(resolved_address);
+        }
+        let allowed = controlled_target && attempt == 0;
         if !allowed {
             self.denied_targets
                 .lock()
