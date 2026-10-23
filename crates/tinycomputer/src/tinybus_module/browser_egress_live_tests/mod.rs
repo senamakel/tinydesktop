@@ -51,7 +51,7 @@ impl EgressHost {
         let allowed_address = self.allowed_addresses.iter().find(|address| {
             resolved_address
                 .as_ref()
-                .map_or(true, |resolved| *address == resolved)
+                .is_none_or(|resolved| *address == resolved)
                 && address
                     .rsplit(':')
                     .next()
@@ -210,6 +210,7 @@ async fn start_browser_with_fixture_hosts(
     .await
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn start_browser_with_fixture_hosts_for_policy(
     allowed_addresses: Vec<String>,
     page_port: u16,
