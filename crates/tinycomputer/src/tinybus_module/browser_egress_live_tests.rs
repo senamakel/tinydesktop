@@ -1,4 +1,4 @@
-//! Opt-in real-Chromium coverage through the loaded TinyComputer module.
+//! Opt-in real-Chromium coverage through the loaded `TinyComputer` module.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use std::sync::{
@@ -22,6 +22,7 @@ use tinycomputer_bus::{
 struct EgressHost {
     allowed: Arc<AtomicBool>,
     allowed_address: String,
+    grant_generation: Option<u64>,
     resolved_address: Arc<Mutex<String>>,
     observations: Arc<Mutex<Vec<String>>>,
 }
@@ -29,6 +30,7 @@ struct EgressHost {
 #[tinybus::interface(name = "ai.tinyhumans.tinycomputer.BrowserEgressHost")]
 impl EgressHost {
     async fn authorize(&self, request: BrowserEgressTarget) -> tinybus::Result<BrowserEgressGrant> {
+        tokio::task::yield_now().await;
         let allow = self.allowed.load(Ordering::SeqCst)
             && request.hostname == "fixture.test"
             && *self.resolved_address.lock().unwrap() == self.allowed_address
@@ -50,7 +52,7 @@ impl EgressHost {
             self.resolved_address.lock().unwrap()
         ));
         Ok(BrowserEgressGrant {
-            generation: request.expected_generation,
+            generation: self.grant_generation.unwrap_or(request.expected_generation),
             authorization: if allow {
                 "fixture-lease"
             } else {
@@ -69,6 +71,7 @@ impl EgressHost {
         &self,
         request: BrowserEgressConsumeRequest,
     ) -> tinybus::Result<BrowserEgressDecision> {
+        tokio::task::yield_now().await;
         self.observations
             .lock()
             .unwrap()
@@ -82,6 +85,7 @@ impl EgressHost {
         &self,
         request: BrowserEgressValidateRequest,
     ) -> tinybus::Result<BrowserEgressDecision> {
+        tokio::task::yield_now().await;
         self.observations
             .lock()
             .unwrap()
@@ -127,6 +131,7 @@ fn successful_data(reply: &DesktopResponse) -> &serde_json::Value {
 }
 
 #[tokio::test]
+#[allow(clippy::too_many_lines)]
 async fn live_chromium_module_dials_only_the_host_returned_socket_and_rejects_changed_policy()
 -> tinybus::Result<()> {
     let allowed_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
@@ -154,6 +159,7 @@ async fn live_chromium_module_dials_only_the_host_returned_socket_and_rejects_ch
             EgressHost {
                 allowed: allowed.clone(),
                 allowed_address: allowed_address.clone(),
+                grant_generation: None,
                 resolved_address: resolved_address.clone(),
                 observations: observations.clone(),
             },
@@ -237,6 +243,11 @@ async fn live_chromium_module_dials_only_the_host_returned_socket_and_rejects_ch
         "denied rebound request reached the previously allowed socket"
     );
 
+    allowed_server.abort();
+    let _ = allowed_server.await;
+    broker_task.abort();
+    let _ = broker_task.await;
+
     let calls = observations.lock().unwrap();
     assert!(
         calls
@@ -265,8 +276,141 @@ async fn live_chromium_module_dials_only_the_host_returned_socket_and_rejects_ch
             .any(|call| call == &format!("resolve:fixture.test:{port}:{rebound_address}")),
         "the controlled resolver did not provide the private rebound answer: {calls:?}"
     );
-    allowed_server.abort();
-    let _ = allowed_server.await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn live_chromium_module_denies_loopback_when_egress_authority_is_missing()
+-> tinybus::Result<()> {
+    let denied_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+    let port = denied_listener.local_addr()?.port();
+
+    let bus = MemoryBus::new();
+    let broker = Broker::new();
+    let broker_task = broker.spawn(bus.clone());
+    let module_host = ModuleHost::new(broker);
+    let module = crate::linked_module().expect("linked module manifest is valid");
+    module_host
+        .attach_linked_with_config(
+            module,
+            serde_json::json!({
+                "browser": {"egress": {"policy_id": "missing-authority", "generation": 7}}
+            }),
+        )
+        .expect("TinyComputer module loads through ModuleHost");
+    let client = Connection::connect(bus.connect().await?).await?;
+    let proxy = client.proxy(names::INTERFACE, names::OBJECT_PATH, names::INTERFACE)?;
+
+    let opened: DesktopResponse = proxy
+        .call(
+            browser_names::methods::OPEN_SESSION,
+            (serde_json::json!({}),),
+        )
+        .await?;
+    let session = successful_data(&opened)["id"].clone();
+    let url = format!("http://127.0.0.1:{port}/must-not-connect");
+    let denied: DesktopResponse = proxy
+        .call(
+            browser_names::methods::NAVIGATE,
+            (serde_json::json!({"session": session, "url": url}),),
+        )
+        .await?;
+
+    assert!(
+        !denied.ok,
+        "navigation without an egress authority unexpectedly succeeded"
+    );
+    assert!(
+        tokio::time::timeout(Duration::from_millis(500), denied_listener.accept())
+            .await
+            .is_err(),
+        "loopback destination received a connection without an egress authority"
+    );
+
     broker_task.abort();
+    let _ = broker_task.await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn live_chromium_module_denies_a_stale_egress_generation_before_dialing()
+-> tinybus::Result<()> {
+    let denied_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+    let allowed_address = denied_listener.local_addr()?.to_string();
+    let port = denied_listener.local_addr()?.port();
+
+    let bus = MemoryBus::new();
+    let broker = Broker::new();
+    let broker_task = broker.spawn(bus.clone());
+    let host_connection = Connection::connect(bus.connect().await?).await?;
+    let observations = Arc::new(Mutex::new(Vec::new()));
+    host_connection
+        .serve_at(
+            browser_egress::OBJECT_PATH.try_into()?,
+            EgressHost {
+                allowed: Arc::new(AtomicBool::new(true)),
+                allowed_address: allowed_address.clone(),
+                grant_generation: Some(40),
+                resolved_address: Arc::new(Mutex::new(allowed_address.clone())),
+                observations: observations.clone(),
+            },
+        )
+        .await?;
+    host_connection
+        .request_name(browser_egress::INTERFACE)
+        .await?;
+
+    let module_host = ModuleHost::new(broker);
+    let module = crate::linked_module().expect("linked module manifest is valid");
+    module_host
+        .attach_linked_with_config(
+            module,
+            serde_json::json!({
+                "browser": {"egress": {"policy_id": "stale-generation", "generation": 41}}
+            }),
+        )
+        .expect("TinyComputer module loads through ModuleHost");
+    let client = Connection::connect(bus.connect().await?).await?;
+    let proxy = client.proxy(names::INTERFACE, names::OBJECT_PATH, names::INTERFACE)?;
+
+    let opened: DesktopResponse = proxy
+        .call(
+            browser_names::methods::OPEN_SESSION,
+            (serde_json::json!({}),),
+        )
+        .await?;
+    let session = successful_data(&opened)["id"].clone();
+    let url = format!("http://fixture.test:{port}/stale-generation");
+    let denied: DesktopResponse = proxy
+        .call(
+            browser_names::methods::NAVIGATE,
+            (serde_json::json!({"session": session, "url": url}),),
+        )
+        .await?;
+
+    assert!(
+        !denied.ok,
+        "navigation with a stale egress generation unexpectedly succeeded"
+    );
+    assert!(
+        tokio::time::timeout(Duration::from_millis(500), denied_listener.accept())
+            .await
+            .is_err(),
+        "stale-generation socket received a connection"
+    );
+    broker_task.abort();
+    let _ = broker_task.await;
+
+    let calls = observations.lock().unwrap();
+    assert!(
+        calls
+            .iter()
+            .any(|call| call.starts_with("authorize:stale-generation:41:fixture.test:")),
+        "the live module did not ask the host for an authorization: {calls:?}"
+    );
+    assert!(
+        !calls.iter().any(|call| call.starts_with("consume:")),
+        "stale grant reached socket consumption: {calls:?}"
+    );
     Ok(())
 }
