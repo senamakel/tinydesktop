@@ -2,6 +2,7 @@
 #![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 
 mod authority_denial_tests;
+mod dns_rebinding_tests;
 #[cfg(feature = "test-connector")]
 mod public_connector_tests;
 mod transport_classes_tests;
@@ -28,6 +29,7 @@ use tinycomputer_bus::{
 struct EgressHost {
     allowed: Arc<AtomicBool>,
     allowed_addresses: Vec<String>,
+    resolved_address: Option<Arc<Mutex<String>>>,
     grant_generation: Option<u64>,
     authorize_delay: Duration,
     observations: Arc<Mutex<Vec<String>>>,
@@ -42,16 +44,29 @@ impl EgressHost {
         ));
         tokio::time::sleep(self.authorize_delay).await;
         tokio::task::yield_now().await;
+        let resolved_address = self
+            .resolved_address
+            .as_ref()
+            .map(|resolved| resolved.lock().unwrap().clone());
         let allowed_address = self.allowed_addresses.iter().find(|address| {
-            address
-                .rsplit(':')
-                .next()
-                .and_then(|port| port.parse::<u16>().ok())
-                == Some(request.port)
+            resolved_address
+                .as_ref()
+                .is_none_or(|resolved| *address == resolved)
+                && address
+                    .rsplit(':')
+                    .next()
+                    .and_then(|port| port.parse::<u16>().ok())
+                    == Some(request.port)
         });
         let allow = self.allowed.load(Ordering::SeqCst)
             && request.hostname == "fixture.test"
             && allowed_address.is_some();
+        if let Some(resolved_address) = resolved_address {
+            self.observations.lock().unwrap().push(format!(
+                "resolve:{}:{}:{}",
+                request.hostname, request.port, resolved_address
+            ));
+        }
         Ok(BrowserEgressGrant {
             generation: self.grant_generation.unwrap_or(request.expected_generation),
             authorization: if allow {
@@ -195,6 +210,7 @@ async fn start_browser_with_fixture_hosts(
     .await
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn start_browser_with_fixture_hosts_for_policy(
     allowed_addresses: Vec<String>,
     page_port: u16,
@@ -204,6 +220,53 @@ async fn start_browser_with_fixture_hosts_for_policy(
     generation: u64,
     shared_observations: Option<Arc<Mutex<Vec<String>>>>,
     test_connector_map: Option<(String, String)>,
+) -> tinybus::Result<LiveBrowser> {
+    start_browser_with_fixture_hosts_for_policy_and_resolution(
+        allowed_addresses,
+        page_port,
+        page_path,
+        served,
+        policy_id,
+        generation,
+        shared_observations,
+        test_connector_map,
+        None,
+    )
+    .await
+}
+
+async fn start_browser_with_fixture_hosts_and_resolution(
+    allowed_addresses: Vec<String>,
+    page_port: u16,
+    page_path: &str,
+    served: tokio::sync::oneshot::Receiver<()>,
+    resolved_address: Option<Arc<Mutex<String>>>,
+) -> tinybus::Result<LiveBrowser> {
+    start_browser_with_fixture_hosts_for_policy_and_resolution(
+        allowed_addresses,
+        page_port,
+        page_path,
+        served,
+        "fixture-policy",
+        41,
+        None,
+        None,
+        resolved_address,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn start_browser_with_fixture_hosts_for_policy_and_resolution(
+    allowed_addresses: Vec<String>,
+    page_port: u16,
+    page_path: &str,
+    served: tokio::sync::oneshot::Receiver<()>,
+    policy_id: &str,
+    generation: u64,
+    shared_observations: Option<Arc<Mutex<Vec<String>>>>,
+    test_connector_map: Option<(String, String)>,
+    resolved_address: Option<Arc<Mutex<String>>>,
 ) -> tinybus::Result<LiveBrowser> {
     let bus = MemoryBus::new();
     let broker = Broker::new();
@@ -217,6 +280,7 @@ async fn start_browser_with_fixture_hosts_for_policy(
             EgressHost {
                 allowed: allowed.clone(),
                 allowed_addresses,
+                resolved_address,
                 grant_generation: None,
                 authorize_delay: Duration::ZERO,
                 observations: observations.clone(),

@@ -115,6 +115,7 @@ async fn live_chromium_denies_stale_egress_generation_before_dialing() -> tinybu
         Some(EgressHost {
             allowed: Arc::new(AtomicBool::new(true)),
             allowed_addresses: vec![allowed_address],
+            resolved_address: None,
             grant_generation: Some(40),
             authorize_delay: Duration::ZERO,
             observations: observations.clone(),
@@ -168,6 +169,7 @@ async fn live_chromium_denies_when_host_authorization_times_out() -> tinybus::Re
         Some(EgressHost {
             allowed: Arc::new(AtomicBool::new(true)),
             allowed_addresses: vec![denied_address.clone()],
+            resolved_address: None,
             grant_generation: None,
             authorize_delay: Duration::from_secs(6),
             observations: observations.clone(),
