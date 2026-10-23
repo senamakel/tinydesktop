@@ -243,6 +243,11 @@ async fn live_chromium_module_dials_only_the_host_returned_socket_and_rejects_ch
         "denied rebound request reached the previously allowed socket"
     );
 
+    allowed_server.abort();
+    let _ = allowed_server.await;
+    broker_task.abort();
+    let _ = broker_task.await;
+
     let calls = observations.lock().unwrap();
     assert!(
         calls
@@ -271,10 +276,6 @@ async fn live_chromium_module_dials_only_the_host_returned_socket_and_rejects_ch
             .any(|call| call == &format!("resolve:fixture.test:{port}:{rebound_address}")),
         "the controlled resolver did not provide the private rebound answer: {calls:?}"
     );
-    drop(calls);
-    allowed_server.abort();
-    let _ = allowed_server.await;
-    broker_task.abort();
     Ok(())
 }
 
@@ -397,6 +398,9 @@ async fn live_chromium_module_denies_a_stale_egress_generation_before_dialing()
             .is_err(),
         "stale-generation socket received a connection"
     );
+    broker_task.abort();
+    let _ = broker_task.await;
+
     let calls = observations.lock().unwrap();
     assert!(
         calls
@@ -408,9 +412,5 @@ async fn live_chromium_module_denies_a_stale_egress_generation_before_dialing()
         !calls.iter().any(|call| call.starts_with("consume:")),
         "stale grant reached socket consumption: {calls:?}"
     );
-    drop(calls);
-
-    broker_task.abort();
-    let _ = broker_task.await;
     Ok(())
 }
