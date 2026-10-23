@@ -24,7 +24,7 @@ async fn loaded_module_consumes_public_socket_before_fixture_mapping() -> tinybu
             TcpStream::connect(fixture_address).await
         }) as Pin<Box<dyn Future<Output = io::Result<TcpStream>> + Send>>
     });
-    let _connector_guard = tinycomputer::test_support::install_browser_egress_connector(connector)
+    let _connector_guard = crate::test_support::install_browser_egress_connector(connector)
         .expect("fixture connector installs once");
 
     let body = b"<!doctype html><link rel=\"icon\" href=\"data:,\"><title>public fixture</title>";
