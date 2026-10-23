@@ -140,7 +140,10 @@ async fn live_chromium_module_dials_only_the_host_returned_socket_and_rejects_ch
     let _guard = LIVE_TEST_LOCK.lock().await;
     let allowed_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
     let port = allowed_listener.local_addr()?.port();
-    let denied_listener = tokio::net::TcpListener::bind(("127.0.0.2", port)).await?;
+    // Use a distinct loopback address that does not require an interface alias
+    // (macOS only binds 127.0.0.1 by default).
+    let denied_listener =
+        tokio::net::TcpListener::bind((std::net::Ipv6Addr::LOCALHOST, port)).await?;
     let allowed_address = allowed_listener.local_addr()?.to_string();
     let rebound_address = denied_listener.local_addr()?.to_string();
     let extra_allowed_connections = Arc::new(AtomicUsize::new(0));
