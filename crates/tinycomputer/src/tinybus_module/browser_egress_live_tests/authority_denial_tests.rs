@@ -116,6 +116,7 @@ async fn live_chromium_denies_stale_egress_generation_before_dialing() -> tinybu
             allowed: Arc::new(AtomicBool::new(true)),
             allowed_addresses: vec![allowed_address],
             grant_generation: Some(40),
+            authorize_delay: Duration::ZERO,
             observations: observations.clone(),
         }),
         "stale-generation",
@@ -153,6 +154,65 @@ async fn live_chromium_denies_stale_egress_generation_before_dialing() -> tinybu
     assert!(
         !calls.iter().any(|call| call.starts_with("consume:")),
         "stale grant reached socket consumption: {calls:?}"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn live_chromium_denies_when_host_authorization_times_out() -> tinybus::Result<()> {
+    let denied_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+    let denied_address = denied_listener.local_addr()?.to_string();
+    let port = denied_listener.local_addr()?.port();
+    let observations = Arc::new(Mutex::new(Vec::new()));
+    let browser = start_denial_browser(
+        Some(EgressHost {
+            allowed: Arc::new(AtomicBool::new(true)),
+            allowed_addresses: vec![denied_address.clone()],
+            grant_generation: None,
+            authorize_delay: Duration::from_secs(6),
+            observations: observations.clone(),
+        }),
+        "slow-authority",
+        12,
+    )
+    .await?;
+    let url = format!("http://fixture.test:{port}/slow-authority");
+    let denied: DesktopResponse = browser
+        .proxy
+        .call(
+            browser_names::methods::NAVIGATE,
+            (serde_json::json!({"session": browser.session, "url": url}),),
+        )
+        .await?;
+
+    assert!(
+        !denied.ok,
+        "navigation unexpectedly succeeded when host authorization exceeded its deadline"
+    );
+    assert!(
+        tokio::time::timeout(Duration::from_millis(500), denied_listener.accept())
+            .await
+            .is_err(),
+        "destination received a connection while host authorization was pending"
+    );
+    close_denial_browser(browser).await?;
+
+    let calls = observations.lock().unwrap();
+    assert!(
+        calls
+            .iter()
+            .any(|call| call.starts_with("authorize:slow-authority:12:fixture.test:")),
+        "the live module did not reach the deliberately slow host authorization: {calls:?}"
+    );
+    assert!(
+        !calls.iter().any(|call| call.starts_with("consume:")),
+        "timed-out authorization reached socket consumption: {calls:?}"
+    );
+    assert!(
+        !calls
+            .iter()
+            .any(|call| call.starts_with(&format!("consume:{denied_address}"))),
+        "timed-out destination was consumed: {calls:?}"
     );
     Ok(())
 }

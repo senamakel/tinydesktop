@@ -29,12 +29,18 @@ struct EgressHost {
     allowed: Arc<AtomicBool>,
     allowed_addresses: Vec<String>,
     grant_generation: Option<u64>,
+    authorize_delay: Duration,
     observations: Arc<Mutex<Vec<String>>>,
 }
 
 #[tinybus::interface(name = "ai.tinyhumans.tinycomputer.BrowserEgressHost")]
 impl EgressHost {
     async fn authorize(&self, request: BrowserEgressTarget) -> tinybus::Result<BrowserEgressGrant> {
+        self.observations.lock().unwrap().push(format!(
+            "authorize:{}:{}:{}:{}",
+            request.policy_id, request.expected_generation, request.hostname, request.port
+        ));
+        tokio::time::sleep(self.authorize_delay).await;
         tokio::task::yield_now().await;
         let allowed_address = self.allowed_addresses.iter().find(|address| {
             address
@@ -46,10 +52,6 @@ impl EgressHost {
         let allow = self.allowed.load(Ordering::SeqCst)
             && request.hostname == "fixture.test"
             && allowed_address.is_some();
-        self.observations.lock().unwrap().push(format!(
-            "authorize:{}:{}:{}:{}",
-            request.policy_id, request.expected_generation, request.hostname, request.port
-        ));
         Ok(BrowserEgressGrant {
             generation: self.grant_generation.unwrap_or(request.expected_generation),
             authorization: if allow {
@@ -216,6 +218,7 @@ async fn start_browser_with_fixture_hosts_for_policy(
                 allowed: allowed.clone(),
                 allowed_addresses,
                 grant_generation: None,
+                authorize_delay: Duration::ZERO,
                 observations: observations.clone(),
             },
         )
