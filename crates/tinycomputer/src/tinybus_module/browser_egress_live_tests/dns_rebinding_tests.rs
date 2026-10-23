@@ -3,6 +3,7 @@
 use super::*;
 
 #[tokio::test]
+#[allow(clippy::too_many_lines)]
 async fn live_chromium_module_never_dials_a_rebound_private_socket() -> tinybus::Result<()> {
     // Keep both endpoints on assigned loopback addresses and the same port;
     // the resolver fixture changes only the address returned for fixture.test.
