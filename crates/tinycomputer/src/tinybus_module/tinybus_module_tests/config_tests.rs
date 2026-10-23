@@ -212,6 +212,50 @@ fn the_browser_configuration_is_read_or_refused() {
 }
 
 #[test]
+fn browser_test_connector_map_is_available_only_in_test_connector_builds() {
+    use crate::tinybus_module::config::BrowserDefaults;
+
+    let config = json!({"browser": {"egress": {
+        "policy_id": "host-policy",
+        "generation": 7,
+        "test_connector_map": {
+            "approved": "8.8.8.8:443",
+            "fixture": "127.0.0.1:443"
+        }
+    }}});
+    #[cfg(feature = "test-connector")]
+    {
+        let defaults = BrowserDefaults::from_config(&config).unwrap();
+        let mapping = defaults.test_connector_map.unwrap();
+        assert_eq!(mapping.approved.to_string(), "8.8.8.8:443");
+        assert_eq!(mapping.fixture.to_string(), "127.0.0.1:443");
+
+        for invalid in [
+            json!({"browser": {"egress": {
+                "policy_id": "p", "generation": 1,
+                "test_connector_map": {"approved": "8.8.4.4:443", "fixture": "127.0.0.1:443"}
+            }}}),
+            json!({"browser": {"egress": {
+                "policy_id": "p", "generation": 1,
+                "test_connector_map": {"approved": "8.8.8.8:443", "fixture": "192.168.1.1:443"}
+            }}}),
+            json!({"browser": {"egress": {
+                "policy_id": "p", "generation": 1,
+                "test_connector_map": {"approved": "8.8.8.8:443", "fixture": "127.0.0.1:80"}
+            }}}),
+            json!({"browser": {"egress": {
+                "policy_id": "p", "generation": 1,
+                "test_connector_map": {"approved": "8.8.8.8:443", "fixture": "127.0.0.1:443", "extra": true}
+            }}}),
+        ] {
+            assert!(BrowserDefaults::from_config(&invalid).is_err(), "{invalid}");
+        }
+    }
+    #[cfg(not(feature = "test-connector"))]
+    assert!(BrowserDefaults::from_config(&config).is_err());
+}
+
+#[test]
 fn browser_defaults_fill_only_what_the_caller_left_unset() {
     use crate::tinybus_module::config::BrowserDefaults;
     use tinycomputer_browser::SessionOptions;
@@ -306,6 +350,45 @@ fn trace_sink_requires_the_host_prepared_unique_destination() {
             .as_str(),
         ":1.42"
     );
+}
+
+#[test]
+fn consequence_host_requires_the_host_prepared_unique_destination() {
+    use crate::tinybus_module::config::consequence_host_destination;
+
+    assert!(consequence_host_destination(&json!({})).unwrap().is_none());
+    assert!(
+        consequence_host_destination(&json!({"consequence_host": false}))
+            .unwrap()
+            .is_none()
+    );
+    for invalid in [
+        json!({"consequence_host": true}),
+        json!({"consequence_host": {}}),
+        json!({"consequence_host": {"destination": "ai.tinyhumans.host"}}),
+        json!({"consequence_host": {"destination": ":1.42", "scope": "model"}}),
+    ] {
+        assert!(consequence_host_destination(&invalid).is_err(), "{invalid}");
+    }
+    assert_eq!(
+        consequence_host_destination(&json!({
+            "consequence_host": {"destination": ":1.42"}
+        }))
+        .unwrap()
+        .unwrap()
+        .as_str(),
+        ":1.42"
+    );
+}
+
+#[test]
+fn connectionless_service_construction_rejects_consequence_host_configuration() {
+    let error = DesktopService::from_config(&json!({
+        "consequence_host": {"destination": ":1.42"}
+    }))
+    .expect_err("a host callback needs the module's bus connection");
+
+    assert!(error.to_string().contains("consequence_host"));
 }
 
 #[test]

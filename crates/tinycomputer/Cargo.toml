@@ -64,6 +64,8 @@ default = []
 # process and is only touched on macOS/Windows, so co-linking is safe.
 static-link = []
 linked = ["static-link"]
+# Exposes a fixture-only TCP connector override for host/module integration tests.
+test-connector = ["tinycomputer-browser/test-connector"]
 
 [lints]
 workspace = true

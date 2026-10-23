@@ -42,9 +42,19 @@ impl DesktopService {
         let defaults = BrowserDefaults::from_config(config)
             .map_err(|error| TinyBusError::failed(error.to_string()))?;
         let browser = if let Some(egress) = defaults.egress {
-            Arc::new(Browser::new(Arc::new(EnforcedAgentBrowser::new(Arc::new(
-                BusAuthorizer::new(connection.clone(), egress.policy_id, egress.generation),
-            )))))
+            let launcher = EnforcedAgentBrowser::new(Arc::new(BusAuthorizer::new(
+                connection.clone(),
+                egress.policy_id,
+                egress.generation,
+            )));
+            #[cfg(feature = "test-connector")]
+            let launcher = defaults
+                .test_connector_map
+                .as_ref()
+                .map_or(launcher.clone(), |mapping| {
+                    launcher.with_test_connector(mapping.connector())
+                });
+            Arc::new(Browser::new(Arc::new(launcher)))
         } else {
             Arc::new(Browser::new(Arc::new(AgentBrowser)))
         };
@@ -71,6 +81,12 @@ impl DesktopService {
             return Err(crate::Error::ConfigFieldType {
                 field: "trace_sink",
                 expected: "a module set up with its host callback connection",
+            });
+        }
+        if super::super::config::consequence_host_destination(config)?.is_some() {
+            return Err(crate::Error::ConfigFieldType {
+                field: "consequence_host",
+                expected: "a module set up with its confidential host callback connection",
             });
         }
         Self::with_browser_and_trace_sink(config, browser, None)

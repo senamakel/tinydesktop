@@ -50,6 +50,9 @@ agent-browser = { workspace = true, optional = true }
 default = []
 # Link agent-browser in-process and provide `AgentBrowser`, its `Launcher`.
 agent-browser = ["dep:agent-browser"]
+# Lets host integration tests substitute the final TCP connector while keeping
+# authorization, grant consumption, and proxy forwarding on the production path.
+test-connector = []
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }

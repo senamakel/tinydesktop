@@ -6,6 +6,8 @@
 //! a desktop `user_agent` and launch `args` once here rather than on every
 //! request.
 
+#[cfg(feature = "test-connector")]
+use std::{future::Future, io, net::SocketAddr, pin::Pin, sync::Arc};
 use tinycomputer_browser::{CursorPace, Perception, ScreenCursor, SessionOptions, Settle};
 
 use crate::Result;
@@ -31,6 +33,9 @@ pub(crate) struct BrowserDefaults {
     pub(crate) prelaunch: bool,
     /// Immutable `TinySecurity` scope captured from host-private configuration.
     pub(crate) egress: Option<BrowserEgressConfig>,
+    /// Exact public-to-local mapping available only in test-connector builds.
+    #[cfg(feature = "test-connector")]
+    pub(crate) test_connector_map: Option<TestConnectorMap>,
 }
 
 /// Host-selected policy identity and generation; never an agent argument.
@@ -38,6 +43,34 @@ pub(crate) struct BrowserDefaults {
 pub(crate) struct BrowserEgressConfig {
     pub(crate) policy_id: String,
     pub(crate) generation: u64,
+}
+
+/// A single exact public socket mapped to a loopback fixture by test builds.
+#[cfg(feature = "test-connector")]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct TestConnectorMap {
+    pub(crate) approved: SocketAddr,
+    pub(crate) fixture: SocketAddr,
+}
+
+#[cfg(feature = "test-connector")]
+impl TestConnectorMap {
+    pub(crate) fn connector(&self) -> tinycomputer_browser::TestConnector {
+        let approved = self.approved;
+        let fixture = self.fixture;
+        Arc::new(move |address| {
+            Box::pin(async move {
+                if address != approved {
+                    return Err(io::Error::new(
+                        io::ErrorKind::PermissionDenied,
+                        "test connector refused an address outside its exact mapping",
+                    ));
+                }
+                tokio::net::TcpStream::connect(fixture).await
+            })
+                as Pin<Box<dyn Future<Output = io::Result<tokio::net::TcpStream>> + Send>>
+        })
+    }
 }
 
 impl std::fmt::Debug for BrowserEgressConfig {
@@ -56,6 +89,8 @@ impl Default for BrowserDefaults {
             settle: Settle::default(),
             prelaunch: true,
             egress: None,
+            #[cfg(feature = "test-connector")]
+            test_connector_map: None,
         }
     }
 }
@@ -128,7 +163,15 @@ impl BrowserDefaults {
                     .and_then(serde_json::Value::as_u64)
                     .filter(|generation| *generation > 0)
                     .ok_or_else(invalid)?;
-                if egress.len() != 2
+                #[cfg(feature = "test-connector")]
+                {
+                    defaults.test_connector_map =
+                        test_connector_map(egress.get("test_connector_map"), &invalid)?;
+                }
+                let expected_egress_keys = 2 + usize::from(
+                    cfg!(feature = "test-connector") && egress.contains_key("test_connector_map"),
+                );
+                if egress.len() != expected_egress_keys
                     || browser.contains_key("args")
                     || browser.contains_key("executable")
                 {
@@ -177,6 +220,39 @@ impl BrowserDefaults {
     }
 }
 
+#[cfg(feature = "test-connector")]
+fn test_connector_map(
+    value: Option<&serde_json::Value>,
+    invalid: &impl Fn() -> crate::Error,
+) -> Result<Option<TestConnectorMap>> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    let object = value.as_object().ok_or_else(invalid)?;
+    if object.len() != 2 {
+        return Err(invalid());
+    }
+    let parse = |name: &str| -> Result<SocketAddr> {
+        object
+            .get(name)
+            .and_then(serde_json::Value::as_str)
+            .and_then(|value| value.parse().ok())
+            .ok_or_else(invalid)
+    };
+    let approved = parse("approved")?;
+    let fixture = parse("fixture")?;
+    if approved.ip().to_string() != "8.8.8.8"
+        || !fixture.ip().is_loopback()
+        || approved.port() != fixture.port()
+        || object
+            .keys()
+            .any(|key| !["approved", "fixture"].contains(&key.as_str()))
+    {
+        return Err(invalid());
+    }
+    Ok(Some(TestConnectorMap { approved, fixture }))
+}
+
 /// Whether the host explicitly selected the trace/report callback.
 pub(crate) fn trace_sink_destination(
     config: &serde_json::Value,
@@ -221,6 +297,44 @@ pub(crate) fn trace_sink_destination(
         Some(_) => Err(crate::Error::ConfigFieldType {
             field: "trace_sink",
             expected: "false or an object with the trusted host callback `destination`",
+        }),
+    }
+}
+
+/// Whether the host prepared a confidential consequence-review callback.
+pub(crate) fn consequence_host_destination(
+    config: &serde_json::Value,
+) -> Result<Option<tinybus::BusName>> {
+    match config
+        .as_object()
+        .and_then(|object| object.get("consequence_host"))
+    {
+        None | Some(serde_json::Value::Bool(false)) => Ok(None),
+        Some(serde_json::Value::Object(options)) if options.len() == 1 => {
+            let destination = options
+                .get("destination")
+                .and_then(serde_json::Value::as_str)
+                .ok_or(crate::Error::ConfigFieldType {
+                    field: "consequence_host.destination",
+                    expected: "the unique name of the host callback prepared for this module",
+                })?;
+            tinybus::BusName::new(destination.to_owned())
+                .map_err(|_| crate::Error::ConfigFieldType {
+                    field: "consequence_host.destination",
+                    expected: "the unique name of the host callback prepared for this module",
+                })
+                .and_then(|name| {
+                    name.is_unique()
+                        .then_some(Some(name))
+                        .ok_or(crate::Error::ConfigFieldType {
+                            field: "consequence_host.destination",
+                            expected: "the unique name of the host callback prepared for this module",
+                        })
+                })
+        }
+        Some(_) => Err(crate::Error::ConfigFieldType {
+            field: "consequence_host",
+            expected: "false or an object containing only the host callback `destination`",
         }),
     }
 }
