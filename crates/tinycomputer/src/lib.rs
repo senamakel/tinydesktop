@@ -92,10 +92,6 @@
 
 mod tinybus_module;
 
-/// Test-only controls for host/module integration fixtures.
-#[cfg(feature = "test-connector")]
-pub mod test_support;
-
 /// Constructs this module for registration with an in-process `TinyBus` host.
 ///
 /// Only present under the `static-link` feature, which replaces the C exports

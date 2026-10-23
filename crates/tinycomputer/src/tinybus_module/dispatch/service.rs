@@ -42,18 +42,18 @@ impl DesktopService {
         let defaults = BrowserDefaults::from_config(config)
             .map_err(|error| TinyBusError::failed(error.to_string()))?;
         let browser = if let Some(egress) = defaults.egress {
-            #[cfg(feature = "test-connector")]
-            let test_connector =
-                crate::test_support::browser_egress_connector(&egress.policy_id, egress.generation);
             let launcher = EnforcedAgentBrowser::new(Arc::new(BusAuthorizer::new(
                 connection.clone(),
                 egress.policy_id,
                 egress.generation,
             )));
             #[cfg(feature = "test-connector")]
-            let launcher = test_connector.map_or(launcher.clone(), |connector| {
-                launcher.with_test_connector(connector)
-            });
+            let launcher = defaults
+                .test_connector_map
+                .as_ref()
+                .map_or(launcher.clone(), |mapping| {
+                    launcher.with_test_connector(mapping.connector())
+                });
             Arc::new(Browser::new(Arc::new(launcher)))
         } else {
             Arc::new(Browser::new(Arc::new(AgentBrowser)))
