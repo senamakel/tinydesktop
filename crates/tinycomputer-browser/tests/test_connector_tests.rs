@@ -96,7 +96,13 @@ async fn proxy_consumes_the_exact_public_grant_before_fixture_connector_mapping(
     .unwrap();
 
     let fixture = tokio::spawn(async move {
-        let (mut stream, _) = fixture_listener.accept().await.unwrap();
+        let (mut stream, _) = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            fixture_listener.accept(),
+        )
+        .await
+        .expect("fixture connector reaches the local listener")
+        .unwrap();
         let mut request = vec![0; 2048];
         let read = stream.read(&mut request).await.unwrap();
         let request = String::from_utf8_lossy(&request[..read]);
@@ -124,7 +130,13 @@ async fn proxy_consumes_the_exact_public_grant_before_fixture_connector_mapping(
         .await
         .unwrap();
     let mut response = Vec::new();
-    client.read_to_end(&mut response).await.unwrap();
+    tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        client.read_to_end(&mut response),
+    )
+    .await
+    .expect("the proxy forwards and closes the fixture response")
+    .unwrap();
     fixture.await.unwrap();
 
     let response = String::from_utf8_lossy(&response);
