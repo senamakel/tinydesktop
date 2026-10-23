@@ -38,6 +38,10 @@ struct EgressHost {
 #[tinybus::interface(name = "ai.tinyhumans.tinycomputer.BrowserEgressHost")]
 impl EgressHost {
     async fn authorize(&self, request: BrowserEgressTarget) -> tinybus::Result<BrowserEgressGrant> {
+        self.observations.lock().unwrap().push(format!(
+            "authorize:{}:{}:{}:{}",
+            request.policy_id, request.expected_generation, request.hostname, request.port
+        ));
         tokio::time::sleep(self.authorize_delay).await;
         tokio::task::yield_now().await;
         let resolved_address = self
@@ -57,10 +61,6 @@ impl EgressHost {
         let allow = self.allowed.load(Ordering::SeqCst)
             && request.hostname == "fixture.test"
             && allowed_address.is_some();
-        self.observations.lock().unwrap().push(format!(
-            "authorize:{}:{}:{}:{}",
-            request.policy_id, request.expected_generation, request.hostname, request.port
-        ));
         if let Some(resolved_address) = resolved_address {
             self.observations.lock().unwrap().push(format!(
                 "resolve:{}:{}:{}",
