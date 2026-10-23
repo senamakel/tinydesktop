@@ -1,4 +1,4 @@
-//! Opt-in real-Chromium coverage through the loaded TinyComputer module.
+//! Opt-in real-Chromium coverage through the loaded `TinyComputer` module.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use std::sync::{
@@ -30,6 +30,7 @@ struct EgressHost {
 #[tinybus::interface(name = "ai.tinyhumans.tinycomputer.BrowserEgressHost")]
 impl EgressHost {
     async fn authorize(&self, request: BrowserEgressTarget) -> tinybus::Result<BrowserEgressGrant> {
+        tokio::task::yield_now().await;
         let allow = self.allowed.load(Ordering::SeqCst)
             && request.hostname == "fixture.test"
             && *self.resolved_address.lock().unwrap() == self.allowed_address
@@ -70,6 +71,7 @@ impl EgressHost {
         &self,
         request: BrowserEgressConsumeRequest,
     ) -> tinybus::Result<BrowserEgressDecision> {
+        tokio::task::yield_now().await;
         self.observations
             .lock()
             .unwrap()
@@ -83,6 +85,7 @@ impl EgressHost {
         &self,
         request: BrowserEgressValidateRequest,
     ) -> tinybus::Result<BrowserEgressDecision> {
+        tokio::task::yield_now().await;
         self.observations
             .lock()
             .unwrap()
@@ -128,6 +131,7 @@ fn successful_data(reply: &DesktopResponse) -> &serde_json::Value {
 }
 
 #[tokio::test]
+#[allow(clippy::too_many_lines)]
 async fn live_chromium_module_dials_only_the_host_returned_socket_and_rejects_changed_policy()
 -> tinybus::Result<()> {
     let allowed_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
@@ -267,6 +271,7 @@ async fn live_chromium_module_dials_only_the_host_returned_socket_and_rejects_ch
             .any(|call| call == &format!("resolve:fixture.test:{port}:{rebound_address}")),
         "the controlled resolver did not provide the private rebound answer: {calls:?}"
     );
+    drop(calls);
     allowed_server.abort();
     let _ = allowed_server.await;
     broker_task.abort();
