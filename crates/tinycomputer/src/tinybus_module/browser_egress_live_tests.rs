@@ -18,6 +18,8 @@ use tinycomputer_bus::{
     names,
 };
 
+static LIVE_TEST_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 #[derive(Clone)]
 struct EgressHost {
     allowed: Arc<AtomicBool>,
@@ -135,6 +137,7 @@ fn successful_data(reply: &DesktopResponse) -> &serde_json::Value {
 #[allow(clippy::too_many_lines)]
 async fn live_chromium_module_dials_only_the_host_returned_socket_and_rejects_changed_policy()
 -> tinybus::Result<()> {
+    let _guard = LIVE_TEST_LOCK.lock().await;
     let allowed_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
     let port = allowed_listener.local_addr()?.port();
     let denied_listener = tokio::net::TcpListener::bind(("127.0.0.2", port)).await?;
@@ -284,6 +287,7 @@ async fn live_chromium_module_dials_only_the_host_returned_socket_and_rejects_ch
 #[tokio::test]
 async fn live_chromium_module_denies_loopback_when_egress_authority_is_missing()
 -> tinybus::Result<()> {
+    let _guard = LIVE_TEST_LOCK.lock().await;
     let denied_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
     let port = denied_listener.local_addr()?.port();
 
@@ -337,6 +341,7 @@ async fn live_chromium_module_denies_loopback_when_egress_authority_is_missing()
 #[tokio::test]
 async fn live_chromium_module_denies_a_stale_egress_generation_before_dialing()
 -> tinybus::Result<()> {
+    let _guard = LIVE_TEST_LOCK.lock().await;
     let denied_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
     let allowed_address = denied_listener.local_addr()?.to_string();
     let port = denied_listener.local_addr()?.port();
@@ -420,6 +425,7 @@ async fn live_chromium_module_denies_a_stale_egress_generation_before_dialing()
 
 #[tokio::test]
 async fn live_chromium_module_denies_when_host_authorization_times_out() -> tinybus::Result<()> {
+    let _guard = LIVE_TEST_LOCK.lock().await;
     let denied_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
     let denied_address = denied_listener.local_addr()?.to_string();
     let port = denied_listener.local_addr()?.port();
