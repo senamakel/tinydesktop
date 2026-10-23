@@ -73,7 +73,8 @@ async fn loaded_module_consumes_public_socket_before_fixture_mapping() -> tinybu
     assert!(
         observed_calls[3..]
             .iter()
-            .all(|call| call.starts_with("validate:"))
+            .all(|call| call.starts_with("validate:")),
+        "unexpected callback or connector event order: {observed_calls:?}"
     );
 
     let closed: DesktopResponse = browser
