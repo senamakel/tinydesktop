@@ -17,7 +17,7 @@ use tokio::{
 };
 
 const SESSION: &str = "fixture-public-dial-session";
-const PASSWORD: &str = "fixture-password";
+const PASSWORD: &str = "fixture-proxy-secret";
 
 struct ExactPublicGrant {
     address: SocketAddr,
@@ -96,13 +96,11 @@ async fn proxy_consumes_the_exact_public_grant_before_fixture_connector_mapping(
     .unwrap();
 
     let fixture = tokio::spawn(async move {
-        let (mut stream, _) = tokio::time::timeout(
-            std::time::Duration::from_secs(5),
-            fixture_listener.accept(),
-        )
-        .await
-        .expect("fixture connector reaches the local listener")
-        .unwrap();
+        let (mut stream, _) =
+            tokio::time::timeout(std::time::Duration::from_secs(5), fixture_listener.accept())
+                .await
+                .expect("fixture connector reaches the local listener")
+                .unwrap();
         let mut request = vec![0; 2048];
         let read = stream.read(&mut request).await.unwrap();
         let request = String::from_utf8_lossy(&request[..read]);
@@ -117,7 +115,7 @@ async fn proxy_consumes_the_exact_public_grant_before_fixture_connector_mapping(
     let mut client = TcpStream::connect(proxy.url().replace("http://", ""))
         .await
         .unwrap();
-    let auth = base64::engine::general_purpose::STANDARD.encode(format!("{SESSION}:{PASSWORD}"));
+    let auth = base64::engine::general_purpose::STANDARD.encode(format!("tinycomputer:{PASSWORD}"));
     client
         .write_all(
             format!(
