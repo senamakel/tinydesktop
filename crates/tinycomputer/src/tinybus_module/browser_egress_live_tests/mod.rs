@@ -285,9 +285,11 @@ async fn start_browser_with_fixture_hosts_for_policy(
 #[tokio::test]
 async fn live_chromium_module_dials_only_the_host_returned_socket_and_rejects_changed_policy()
 -> tinybus::Result<()> {
-    let allowed_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+    // Use the two loopback families to model distinct sockets on the same
+    // port. Unlike 127.0.0.2, ::1 is assigned consistently across platforms.
+    let allowed_listener = tokio::net::TcpListener::bind("[::1]:0").await?;
     let port = allowed_listener.local_addr()?.port();
-    let denied_listener = tokio::net::TcpListener::bind(("127.0.0.2", port)).await?;
+    let denied_listener = tokio::net::TcpListener::bind(("127.0.0.1", port)).await?;
     let allowed_address = allowed_listener.local_addr()?.to_string();
     let extra_allowed_connections = Arc::new(AtomicUsize::new(0));
     let (served_tx, served_rx) = tokio::sync::oneshot::channel();
