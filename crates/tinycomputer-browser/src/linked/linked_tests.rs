@@ -76,6 +76,26 @@ async fn enforced_launcher_creates_a_private_session_without_implicit_launch() {
 }
 
 #[tokio::test]
+async fn enforced_launcher_binds_its_proxy_on_loopback_before_launch() {
+    let linked = Linked {
+        state: DaemonState::with_options(state_options("proxy-bind")),
+        egress_authorizer: Some(Arc::new(RejectAll)),
+        proxy: None,
+        proxy_session_id: "private-session-id".into(),
+        enforced_launch: false,
+        #[cfg(feature = "test-connector")]
+        test_connector: None,
+    };
+
+    let proxy = linked
+        .bind_egress_proxy(Arc::new(RejectAll))
+        .await
+        .expect("the local egress proxy binds without opening a browser");
+
+    assert!(proxy.url().starts_with("http://127.0.0.1:"));
+}
+
+#[tokio::test]
 async fn enforced_browser_refuses_implicit_launch_before_any_request() {
     let mut engine = EnforcedAgentBrowser::new(Arc::new(RejectAll)).open("unit");
     let reply = engine
