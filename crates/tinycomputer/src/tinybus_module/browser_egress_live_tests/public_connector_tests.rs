@@ -62,19 +62,20 @@ async fn loaded_module_consumes_public_socket_before_fixture_mapping() -> tinybu
     assert!(observed.iter().any(|call| call == &expected_consume));
     let observed_calls = calls.lock().unwrap().clone();
     assert_eq!(
-        &observed_calls[..3],
+        &observed_calls[..4],
         [
             expected_authorize,
             expected_consume,
             format!("connect:{public_socket}"),
+            "validate:fixture-lease".into(),
         ],
-        "the exact TinyBus-consumed socket is passed to the fixture connector after authorization"
+        "the exact TinyBus-consumed socket is passed to the fixture connector before lease validation"
     );
     assert!(
-        observed_calls[3..]
+        observed_calls[4..]
             .iter()
-            .all(|call| call.starts_with("validate:")),
-        "unexpected callback or connector event order: {observed_calls:?}"
+            .all(|call| call.starts_with("authorize:") && call.contains(":www.google.com:443")),
+        "background public requests must stop at authorization without consume or connector: {observed_calls:?}"
     );
 
     let closed: DesktopResponse = browser
