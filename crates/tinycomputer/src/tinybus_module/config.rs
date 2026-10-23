@@ -49,13 +49,13 @@ pub(crate) struct BrowserEgressConfig {
 #[cfg(feature = "test-connector")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct TestConnectorMap {
-    approved: SocketAddr,
-    fixture: SocketAddr,
+    pub(crate) approved: SocketAddr,
+    pub(crate) fixture: SocketAddr,
 }
 
 #[cfg(feature = "test-connector")]
 impl TestConnectorMap {
-    fn connector(&self) -> tinycomputer_browser::TestConnector {
+    pub(crate) fn connector(&self) -> tinycomputer_browser::TestConnector {
         let approved = self.approved;
         let fixture = self.fixture;
         Arc::new(move |address| {
