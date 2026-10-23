@@ -270,3 +270,56 @@ async fn live_chromium_module_dials_only_the_host_returned_socket_and_rejects_ch
     broker_task.abort();
     Ok(())
 }
+
+#[tokio::test]
+async fn live_chromium_module_denies_loopback_when_egress_authority_is_missing()
+-> tinybus::Result<()> {
+    let denied_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+    let port = denied_listener.local_addr()?.port();
+
+    let bus = MemoryBus::new();
+    let broker = Broker::new();
+    let broker_task = broker.spawn(bus.clone());
+    let module_host = ModuleHost::new(broker);
+    let module = crate::linked_module().expect("linked module manifest is valid");
+    module_host
+        .attach_linked_with_config(
+            module,
+            serde_json::json!({
+                "browser": {"egress": {"policy_id": "missing-authority", "generation": 7}}
+            }),
+        )
+        .expect("TinyComputer module loads through ModuleHost");
+    let client = Connection::connect(bus.connect().await?).await?;
+    let proxy = client.proxy(names::INTERFACE, names::OBJECT_PATH, names::INTERFACE)?;
+
+    let opened: DesktopResponse = proxy
+        .call(
+            browser_names::methods::OPEN_SESSION,
+            (serde_json::json!({}),),
+        )
+        .await?;
+    let session = successful_data(&opened)["id"].clone();
+    let url = format!("http://127.0.0.1:{port}/must-not-connect");
+    let denied: DesktopResponse = proxy
+        .call(
+            browser_names::methods::NAVIGATE,
+            (serde_json::json!({"session": session, "url": url}),),
+        )
+        .await?;
+
+    assert!(
+        !denied.ok,
+        "navigation without an egress authority unexpectedly succeeded"
+    );
+    assert!(
+        tokio::time::timeout(Duration::from_millis(500), denied_listener.accept())
+            .await
+            .is_err(),
+        "loopback destination received a connection without an egress authority"
+    );
+
+    broker_task.abort();
+    let _ = broker_task.await;
+    Ok(())
+}
