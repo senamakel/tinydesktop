@@ -102,6 +102,30 @@ struct Linked {
     test_connector: Option<crate::egress::TestConnector>,
 }
 
+impl Linked {
+    async fn bind_egress_proxy(
+        &self,
+        authorizer: Arc<dyn EgressAuthorizer>,
+    ) -> std::io::Result<EgressProxy> {
+        #[cfg(feature = "test-connector")]
+        if let Some(connector) = self.test_connector.clone() {
+            return EgressProxy::bind_with_test_connector(
+                authorizer,
+                self.proxy_session_id.clone(),
+                self.proxy_session_id.clone(),
+                move |address| connector(address),
+            )
+            .await;
+        }
+        EgressProxy::bind(
+            authorizer,
+            self.proxy_session_id.clone(),
+            self.proxy_session_id.clone(),
+        )
+        .await
+    }
+}
+
 impl Engine for Linked {
     fn execute(&mut self, command: Value) -> Reply<'_> {
         let action = command
@@ -121,35 +145,7 @@ impl Engine for Linked {
                     return failure_reply(&command, "network policy has no host authorizer");
                 };
                 if self.proxy.is_none() {
-                    let proxy = {
-                        #[cfg(feature = "test-connector")]
-                        if let Some(connector) = self.test_connector.clone() {
-                            EgressProxy::bind_with_test_connector(
-                                authorizer,
-                                self.proxy_session_id.clone(),
-                                self.proxy_session_id.clone(),
-                                move |address| connector(address),
-                            )
-                            .await
-                        } else {
-                            EgressProxy::bind(
-                                authorizer,
-                                self.proxy_session_id.clone(),
-                                self.proxy_session_id.clone(),
-                            )
-                            .await
-                        }
-                        #[cfg(not(feature = "test-connector"))]
-                        {
-                            EgressProxy::bind(
-                                authorizer,
-                                self.proxy_session_id.clone(),
-                                self.proxy_session_id.clone(),
-                            )
-                            .await
-                        }
-                    };
-                    match proxy {
+                    match self.bind_egress_proxy(authorizer).await {
                         Ok(proxy) => self.proxy = Some(proxy),
                         Err(_) => {
                             return failure_reply(&command, "network policy proxy could not start");

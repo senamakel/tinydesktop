@@ -93,6 +93,8 @@ async fn a_closed_or_lost_browser_cannot_implicitly_launch_without_the_proxy() {
         proxy: None,
         proxy_session_id: "private-session-id".into(),
         enforced_launch: true,
+        #[cfg(feature = "test-connector")]
+        test_connector: None,
     };
     let reply = engine
         .execute(json!({"id":"navigate","action":"navigate","url":"http://public.example/"}))
@@ -114,6 +116,8 @@ async fn an_exited_enforced_browser_can_still_be_closed() {
         proxy: None,
         proxy_session_id: "private-session-id".into(),
         enforced_launch: true,
+        #[cfg(feature = "test-connector")]
+        test_connector: None,
     };
 
     let reply = engine.execute(json!({"id":"close","action":"close"})).await;
@@ -131,6 +135,8 @@ async fn enforced_browser_refuses_process_side_reads_with_a_url() {
         proxy: None,
         proxy_session_id: "private-session-id".into(),
         enforced_launch: true,
+        #[cfg(feature = "test-connector")]
+        test_connector: None,
     };
     let reply = engine
         .execute(json!({
@@ -156,6 +162,8 @@ async fn enforced_browser_rechecks_liveness_after_waiting_for_engine_lock() {
         proxy: None,
         proxy_session_id: "private-session-id".into(),
         enforced_launch: true,
+        #[cfg(feature = "test-connector")]
+        test_connector: None,
     };
     let serialized = ENGINE.lock().await;
     let pending = tokio::spawn(async move {
