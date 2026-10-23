@@ -30,13 +30,17 @@ async fn live_chromium_module_never_dials_a_rebound_private_socket() -> tinybus:
     )
     .await?;
 
-    let before_rebind_authorizations = browser
-        .observations
-        .lock()
-        .unwrap()
+    let calls_before_rebind = browser.observations.lock().unwrap().clone();
+    let before_rebind_authorizations = calls_before_rebind
         .iter()
         .filter(|call| call.starts_with("authorize:fixture-policy:41:fixture.test:"))
         .count();
+    assert!(
+        calls_before_rebind
+            .iter()
+            .any(|call| call == &format!("consume:{allowed_address}")),
+        "the initial allowed socket was not consumed: {calls_before_rebind:?}"
+    );
     let connections_before_rebind = extra_connections.load(Ordering::SeqCst);
     *resolved_address.lock().unwrap() = rebound_address.clone();
     let denied: DesktopResponse = browser
