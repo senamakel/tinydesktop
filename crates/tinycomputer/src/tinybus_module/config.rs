@@ -6,9 +6,9 @@
 //! a desktop `user_agent` and launch `args` once here rather than on every
 //! request.
 
-use tinycomputer_browser::{CursorPace, Perception, ScreenCursor, SessionOptions, Settle};
 #[cfg(feature = "test-connector")]
 use std::{future::Future, io, net::SocketAddr, pin::Pin, sync::Arc};
+use tinycomputer_browser::{CursorPace, Perception, ScreenCursor, SessionOptions, Settle};
 
 use crate::Result;
 
@@ -67,7 +67,8 @@ impl TestConnectorMap {
                     ));
                 }
                 tokio::net::TcpStream::connect(fixture).await
-            }) as Pin<Box<dyn Future<Output = io::Result<tokio::net::TcpStream>> + Send>>
+            })
+                as Pin<Box<dyn Future<Output = io::Result<tokio::net::TcpStream>> + Send>>
         })
     }
 }
@@ -164,7 +165,8 @@ impl BrowserDefaults {
                     .ok_or_else(invalid)?;
                 #[cfg(feature = "test-connector")]
                 {
-                    defaults.test_connector_map = test_connector_map(egress.get("test_connector_map"), &invalid)?;
+                    defaults.test_connector_map =
+                        test_connector_map(egress.get("test_connector_map"), &invalid)?;
                 }
                 let expected_egress_keys = 2 + usize::from(
                     cfg!(feature = "test-connector") && egress.contains_key("test_connector_map"),
@@ -242,7 +244,9 @@ fn test_connector_map(
     if approved.ip().to_string() != "8.8.8.8"
         || !fixture.ip().is_loopback()
         || approved.port() != fixture.port()
-        || object.keys().any(|key| !["approved", "fixture"].contains(&key.as_str()))
+        || object
+            .keys()
+            .any(|key| !["approved", "fixture"].contains(&key.as_str()))
     {
         return Err(invalid());
     }

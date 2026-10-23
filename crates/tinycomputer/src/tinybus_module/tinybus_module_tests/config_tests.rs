@@ -212,6 +212,50 @@ fn the_browser_configuration_is_read_or_refused() {
 }
 
 #[test]
+fn browser_test_connector_map_is_available_only_in_test_connector_builds() {
+    use crate::tinybus_module::config::BrowserDefaults;
+
+    let config = json!({"browser": {"egress": {
+        "policy_id": "host-policy",
+        "generation": 7,
+        "test_connector_map": {
+            "approved": "8.8.8.8:443",
+            "fixture": "127.0.0.1:443"
+        }
+    }}});
+    #[cfg(feature = "test-connector")]
+    {
+        let defaults = BrowserDefaults::from_config(&config).unwrap();
+        let mapping = defaults.test_connector_map.unwrap();
+        assert_eq!(mapping.approved.to_string(), "8.8.8.8:443");
+        assert_eq!(mapping.fixture.to_string(), "127.0.0.1:443");
+
+        for invalid in [
+            json!({"browser": {"egress": {
+                "policy_id": "p", "generation": 1,
+                "test_connector_map": {"approved": "8.8.4.4:443", "fixture": "127.0.0.1:443"}
+            }}}),
+            json!({"browser": {"egress": {
+                "policy_id": "p", "generation": 1,
+                "test_connector_map": {"approved": "8.8.8.8:443", "fixture": "192.168.1.1:443"}
+            }}}),
+            json!({"browser": {"egress": {
+                "policy_id": "p", "generation": 1,
+                "test_connector_map": {"approved": "8.8.8.8:443", "fixture": "127.0.0.1:80"}
+            }}}),
+            json!({"browser": {"egress": {
+                "policy_id": "p", "generation": 1,
+                "test_connector_map": {"approved": "8.8.8.8:443", "fixture": "127.0.0.1:443", "extra": true}
+            }}}),
+        ] {
+            assert!(BrowserDefaults::from_config(&invalid).is_err(), "{invalid}");
+        }
+    }
+    #[cfg(not(feature = "test-connector"))]
+    assert!(BrowserDefaults::from_config(&config).is_err());
+}
+
+#[test]
 fn browser_defaults_fill_only_what_the_caller_left_unset() {
     use crate::tinybus_module::config::BrowserDefaults;
     use tinycomputer_browser::SessionOptions;

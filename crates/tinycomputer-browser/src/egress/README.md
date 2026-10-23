@@ -6,6 +6,15 @@ the engine adapter (`EgressAuthorizer`) small: the host authorizes the parsed
 destination, returns a one-use grant and exact socket addresses, consumes a
 grant before each dial, and revalidates active leases.
 
+Host integration tests can enable the `test-connector` feature and provide
+`EgressProxy::bind_with_test_connector` (or the corresponding
+`EnforcedAgentBrowser` builder) to replace only the final TCP operation. The
+connector receives the exact approved socket after grant consumption. The
+TinyComputer module exposes a stricter module-config mapping for dynamic test
+artifacts; it accepts one `8.8.8.8:port` to loopback `127.0.0.1:port` mapping
+and denies all other sockets. Production builds do not parse that test-only
+field.
+
 ## Structure
 
 - `mod.rs` defines the public `BrowserDialTarget`, `DialGrant`,

@@ -169,6 +169,7 @@ async fn start_browser_with_fixture_host(
         "fixture-policy",
         41,
         None,
+        None,
     )
     .await
 }
@@ -187,6 +188,7 @@ async fn start_browser_with_fixture_hosts(
         "fixture-policy",
         41,
         None,
+        None,
     )
     .await
 }
@@ -199,6 +201,7 @@ async fn start_browser_with_fixture_hosts_for_policy(
     policy_id: &str,
     generation: u64,
     shared_observations: Option<Arc<Mutex<Vec<String>>>>,
+    test_connector_map: Option<(String, String)>,
 ) -> tinybus::Result<LiveBrowser> {
     let bus = MemoryBus::new();
     let broker = Broker::new();
@@ -223,13 +226,17 @@ async fn start_browser_with_fixture_hosts_for_policy(
 
     let module_host = ModuleHost::new(broker);
     let module = crate::linked_module().expect("linked module manifest is valid");
+    let mut module_config = serde_json::json!({
+        "browser": {"egress": {"policy_id": policy_id, "generation": generation}}
+    });
+    if let Some((approved, fixture)) = test_connector_map {
+        module_config["browser"]["egress"]["test_connector_map"] = serde_json::json!({
+            "approved": approved,
+            "fixture": fixture,
+        });
+    }
     module_host
-        .attach_linked_with_config(
-            module,
-            serde_json::json!({
-                "browser": {"egress": {"policy_id": policy_id, "generation": generation}}
-            }),
-        )
+        .attach_linked_with_config(module, module_config)
         .expect("TinyComputer module loads through ModuleHost");
     let client = Connection::connect(bus.connect().await?).await?;
     let proxy = client.proxy(names::INTERFACE, names::OBJECT_PATH, names::INTERFACE)?;
