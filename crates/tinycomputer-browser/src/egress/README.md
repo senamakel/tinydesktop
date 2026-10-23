@@ -13,7 +13,9 @@ connector receives the exact approved socket after grant consumption. The
 TinyComputer module exposes a stricter module-config mapping for dynamic test
 artifacts; it accepts one `8.8.8.8:port` to loopback `127.0.0.1:port` mapping
 and denies all other sockets. Production builds do not parse that test-only
-field.
+field. In a `test-connector` build, a host fixture supplies it at
+`browser.egress.test_connector_map` as
+`{"approved":"8.8.8.8:<port>","fixture":"127.0.0.1:<same-port>"}`.
 
 The loaded-module Chromium test is opt-in and is not part of hosted CI, whose
 module-e2e lane packages and verifies the artifact without launching Chromium.
