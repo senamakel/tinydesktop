@@ -128,6 +128,20 @@ async fn serve_fixture(
     }
 }
 
+async fn serve_redirect_fixture(listener: tokio::net::TcpListener, location: String) {
+    let (mut stream, _) = tokio::time::timeout(Duration::from_secs(10), listener.accept())
+        .await
+        .expect("authorized Chromium socket arrives before the deadline")
+        .expect("fixture listener accepts the authorized socket");
+    let mut request = [0_u8; 4096];
+    let _ = tokio::io::AsyncReadExt::read(&mut stream, &mut request).await;
+    assert!(String::from_utf8_lossy(&request).contains("GET /redirect"));
+    let response = format!(
+        "HTTP/1.1 302 Found\r\nLocation: {location}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+    );
+    let _ = tokio::io::AsyncWriteExt::write_all(&mut stream, response.as_bytes()).await;
+}
+
 fn successful_data(reply: &DesktopResponse) -> &serde_json::Value {
     assert!(reply.ok, "{} failed: {:?}", reply.command, reply.error);
     reply.data.as_ref().expect("successful response has data")
@@ -284,6 +298,100 @@ async fn live_chromium_module_dials_only_the_host_returned_socket_and_rejects_ch
             .any(|call| call == &format!("resolve:fixture.test:{port}:{rebound_address}")),
         "the controlled resolver did not provide the private rebound answer: {calls:?}"
     );
+    Ok(())
+}
+
+#[tokio::test]
+async fn live_chromium_module_authorizes_redirect_hops_before_dialing() -> tinybus::Result<()> {
+    let _guard = LIVE_TEST_LOCK.lock().await;
+    let allowed_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+    let allowed_address = allowed_listener.local_addr()?.to_string();
+    let allowed_port = allowed_listener.local_addr()?.port();
+    let denied_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+    let denied_address = denied_listener.local_addr()?.to_string();
+    let denied_port = denied_listener.local_addr()?.port();
+    let redirect_location = format!("http://private.fixture.test:{denied_port}/private");
+    let allowed_server = tokio::spawn(serve_redirect_fixture(
+        allowed_listener,
+        redirect_location.clone(),
+    ));
+
+    let bus = MemoryBus::new();
+    let broker = Broker::new();
+    let broker_task = broker.spawn(bus.clone());
+    let host_connection = Connection::connect(bus.connect().await?).await?;
+    let observations = Arc::new(Mutex::new(Vec::new()));
+    host_connection
+        .serve_at(
+            browser_egress::OBJECT_PATH.try_into()?,
+            EgressHost {
+                allowed: Arc::new(AtomicBool::new(true)),
+                allowed_address: allowed_address.clone(),
+                grant_generation: None,
+                authorize_delay: Duration::ZERO,
+                resolved_address: Arc::new(Mutex::new(allowed_address.clone())),
+                observations: observations.clone(),
+            },
+        )
+        .await?;
+    host_connection
+        .request_name(browser_egress::INTERFACE)
+        .await?;
+
+    let module_host = ModuleHost::new(broker);
+    let module = crate::linked_module().expect("linked module manifest is valid");
+    module_host
+        .attach_linked_with_config(
+            module,
+            serde_json::json!({
+                "browser": {"egress": {"policy_id": "redirect-policy", "generation": 41}}
+            }),
+        )
+        .expect("TinyComputer module loads through ModuleHost");
+    let client = Connection::connect(bus.connect().await?).await?;
+    let proxy = client.proxy(names::INTERFACE, names::OBJECT_PATH, names::INTERFACE)?;
+
+    let opened: DesktopResponse = proxy
+        .call(
+            browser_names::methods::OPEN_SESSION,
+            (serde_json::json!({}),),
+        )
+        .await?;
+    let session = successful_data(&opened)["id"].clone();
+    let url = format!("http://fixture.test:{allowed_port}/redirect");
+    let _navigated: DesktopResponse = proxy
+        .call(
+            browser_names::methods::NAVIGATE,
+            (serde_json::json!({"session": session, "url": url}),),
+        )
+        .await?;
+    allowed_server.await.expect("redirect server completes");
+
+    let calls = observations.lock().unwrap();
+    assert!(
+        calls.iter().any(|call| {
+            call.starts_with(&format!(
+                "authorize:redirect-policy:41:private.fixture.test:{denied_port}"
+            ))
+        }),
+        "Chromium's redirect hop did not go through host authorization: {calls:?}"
+    );
+    assert!(
+        !calls
+            .iter()
+            .any(|call| call == &format!("consume:{denied_address}")),
+        "redirect destination socket reached grant consumption: {calls:?}"
+    );
+    drop(calls);
+    assert!(
+        tokio::time::timeout(Duration::from_millis(500), denied_listener.accept())
+            .await
+            .is_err(),
+        "redirect destination received a connection despite host denial"
+    );
+
+    broker_task.abort();
+    let _ = broker_task.await;
     Ok(())
 }
 
