@@ -1,5 +1,6 @@
 //! Feature-gated integration tests for host-provided fixture connectors.
 #![cfg(feature = "test-connector")]
+#![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 
 use std::{
     future::Future,
