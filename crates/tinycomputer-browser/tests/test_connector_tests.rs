@@ -137,11 +137,14 @@ async fn proxy_consumes_the_exact_public_grant_before_fixture_connector_mapping(
     .await
     .expect("the proxy forwards and closes the fixture response")
     .unwrap();
-    fixture.await.unwrap();
-
     let response = String::from_utf8_lossy(&response);
-    assert!(response.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert!(
+        response.starts_with("HTTP/1.1 200 OK\r\n"),
+        "unexpected proxy response {response:?}; calls {:?}",
+        calls.lock().unwrap()
+    );
     assert!(response.ends_with("fixture"));
+    fixture.await.unwrap();
     assert_eq!(
         *calls.lock().unwrap(),
         [
