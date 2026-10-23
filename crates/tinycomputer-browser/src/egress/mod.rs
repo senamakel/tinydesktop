@@ -15,6 +15,15 @@ mod forward;
 mod request;
 mod serve;
 
+/// Fixture-only replacement for the final TCP connect in host integration tests.
+///
+/// The callback receives the exact socket selected by authorization and grant
+/// consumption. Test connectors should map it to a local fixture only.
+#[cfg(feature = "test-connector")]
+pub type TestConnector = Arc<
+    dyn Fn(SocketAddr) -> Pin<Box<dyn Future<Output = io::Result<TcpStream>> + Send>> + Send + Sync,
+>;
+
 #[cfg(test)]
 pub(crate) use serve::connect_approved_addresses;
 

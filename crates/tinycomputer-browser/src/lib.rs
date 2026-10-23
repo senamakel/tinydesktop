@@ -57,6 +57,8 @@ pub use action_gate::{
     ActionContext, ActionGate, ActionRequest, ActionTarget, ActionVerdict, AllowAllActions,
     ObservationKind,
 };
+#[cfg(feature = "test-connector")]
+pub use egress::TestConnector;
 pub use egress::{BrowserDialTarget, DialGrant, EgressAuthorizer, EgressProxy};
 pub use engine::{Engine, Launcher, Reply};
 pub use error::{Error, Result};

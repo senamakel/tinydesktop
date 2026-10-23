@@ -2,6 +2,8 @@
 #![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 
 mod authority_denial_tests;
+#[cfg(feature = "test-connector")]
+mod public_connector_tests;
 mod transport_classes_tests;
 mod worker;
 
