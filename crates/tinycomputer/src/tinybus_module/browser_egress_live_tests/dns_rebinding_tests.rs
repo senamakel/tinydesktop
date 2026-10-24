@@ -16,7 +16,7 @@ async fn live_chromium_module_never_dials_a_rebound_private_socket() -> tinybus:
     let (served_tx, served_rx) = tokio::sync::oneshot::channel();
     let server = tokio::spawn(serve_fixture(
         allowed_listener,
-        b"<!doctype html><title>allowed fixture</title>".to_vec(),
+        b"<!doctype html><link rel=\"icon\" href=\"data:,\"><title>allowed fixture</title>".to_vec(),
         extra_connections.clone(),
         served_tx,
         None,
