@@ -231,6 +231,7 @@ async fn start_browser_with_fixture_hosts_for_policy(
         shared_observations,
         test_connector_map,
         None,
+        None,
     )
     .await
 }
@@ -252,6 +253,7 @@ async fn start_browser_with_fixture_hosts_and_resolution(
         None,
         None,
         resolved_address,
+        None,
     )
     .await
 }
@@ -267,6 +269,7 @@ async fn start_browser_with_fixture_hosts_for_policy_and_resolution(
     shared_observations: Option<Arc<Mutex<Vec<String>>>>,
     test_connector_map: Option<(String, String)>,
     resolved_address: Option<Arc<Mutex<String>>>,
+    caller_options: Option<serde_json::Value>,
 ) -> tinybus::Result<LiveBrowser> {
     let bus = MemoryBus::new();
     let broker = Broker::new();
@@ -311,7 +314,7 @@ async fn start_browser_with_fixture_hosts_for_policy_and_resolution(
     let opened: DesktopResponse = proxy
         .call(
             browser_names::methods::OPEN_SESSION,
-            (serde_json::json!({}),),
+            (caller_options.unwrap_or_else(|| serde_json::json!({})),),
         )
         .await?;
     let session = successful_data(&opened)["id"].clone();
@@ -344,6 +347,77 @@ async fn start_browser_with_fixture_hosts_for_policy_and_resolution(
         _host_connection: host_connection,
         _module_host: module_host,
     })
+}
+
+#[tokio::test]
+async fn live_chromium_module_ignores_caller_supplied_egress_identity() -> tinybus::Result<()> {
+    let allowed_listener = tokio::net::TcpListener::bind("[::1]:0").await?;
+    let allowed_address = allowed_listener.local_addr()?.to_string();
+    let port = allowed_listener.local_addr()?.port();
+    let (served_tx, served_rx) = tokio::sync::oneshot::channel();
+    let allowed_server = tokio::spawn(serve_fixture(
+        allowed_listener,
+        b"<!doctype html><link rel=\"icon\" href=\"data:,\"><title>identity fixture</title>"
+            .to_vec(),
+        Arc::new(AtomicUsize::new(0)),
+        served_tx,
+        None,
+    ));
+    let browser = start_browser_with_fixture_hosts_for_policy_and_resolution(
+        vec![allowed_address.clone()],
+        port,
+        "/identity",
+        served_rx,
+        "module-policy",
+        73,
+        None,
+        None,
+        None,
+        Some(serde_json::json!({
+            "policy_id": "caller-policy",
+            "generation": 999,
+            "egress": {"policy_id": "caller-policy", "generation": 999}
+        })),
+    )
+    .await?;
+
+    {
+        let calls = browser.observations.lock().unwrap();
+        assert!(
+            calls
+                .iter()
+                .any(|call| call.starts_with("authorize:module-policy:73:fixture.test:")),
+            "the loaded module did not use its host-provided egress scope: {calls:?}"
+        );
+        assert!(
+            !calls
+                .iter()
+                .any(|call| call.contains("caller-policy") || call.contains(":999:")),
+            "caller-supplied identity reached the host authority: {calls:?}"
+        );
+        assert!(
+            calls
+                .iter()
+                .any(|call| call == &format!("consume:{allowed_address}")),
+            "the host did not consume the socket under the module scope: {calls:?}"
+        );
+    }
+
+    let closed: DesktopResponse = browser
+        .proxy
+        .call(
+            browser_names::methods::CLOSE_SESSION,
+            (serde_json::json!({"session": browser.session}),),
+        )
+        .await?;
+    assert!(
+        closed.ok,
+        "browser session did not close: {:?}",
+        closed.error
+    );
+    browser.broker_task.abort();
+    allowed_server.abort();
+    Ok(())
 }
 
 #[tokio::test]
