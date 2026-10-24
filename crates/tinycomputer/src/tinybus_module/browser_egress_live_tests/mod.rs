@@ -38,6 +38,7 @@ struct EgressHost {
 #[tinybus::interface(name = "ai.tinyhumans.tinycomputer.BrowserEgressHost")]
 impl EgressHost {
     async fn authorize(&self, request: BrowserEgressTarget) -> tinybus::Result<BrowserEgressGrant> {
+        tokio::task::yield_now().await;
         self.observations.lock().unwrap().push(format!(
             "authorize:{}:{}:{}:{}",
             request.policy_id, request.expected_generation, request.hostname, request.port
@@ -423,11 +424,12 @@ async fn live_chromium_module_ignores_caller_supplied_egress_identity() -> tinyb
 #[tokio::test]
 async fn live_chromium_module_dials_only_the_host_returned_socket_and_rejects_changed_policy()
 -> tinybus::Result<()> {
-    // Use the two loopback families to model distinct sockets on the same
-    // port. Unlike 127.0.0.2, ::1 is assigned consistently across platforms.
-    let allowed_listener = tokio::net::TcpListener::bind("[::1]:0").await?;
+    let allowed_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
     let port = allowed_listener.local_addr()?.port();
-    let denied_listener = tokio::net::TcpListener::bind(("127.0.0.1", port)).await?;
+    let denied_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+    let denied_address = denied_listener.local_addr()?;
+    let denied_port = denied_address.port();
+    assert_ne!(port, denied_port);
     let allowed_address = allowed_listener.local_addr()?.to_string();
     let extra_allowed_connections = Arc::new(AtomicUsize::new(0));
     let (served_tx, served_rx) = tokio::sync::oneshot::channel();
@@ -440,9 +442,13 @@ async fn live_chromium_module_dials_only_the_host_returned_socket_and_rejects_ch
         None,
     ));
 
-    let browser =
-        start_browser_with_fixture_host(allowed_address.clone(), port, "/allowed", served_rx)
-            .await?;
+    let browser = start_browser_with_fixture_hosts(
+        vec![allowed_address.clone(), denied_address.to_string()],
+        port,
+        "/allowed",
+        served_rx,
+    )
+    .await?;
 
     let authorizations_before_policy_change = browser
         .observations
@@ -455,7 +461,7 @@ async fn live_chromium_module_dials_only_the_host_returned_socket_and_rejects_ch
     // Simulate a policy refresh: the host changes from granting the fixture
     // socket to denying requests for the same hostname.
     browser.allowed.store(false, Ordering::SeqCst);
-    let denied_url = format!("http://fixture.test:{port}/after-policy-change");
+    let denied_url = format!("http://fixture.test:{denied_port}/after-policy-change");
     let denied: DesktopResponse = browser
         .proxy
         .call(

@@ -1,17 +1,17 @@
-//! Live Chromium coverage for a fixture host rebound between authorizations.
+//! Live Chromium coverage for a destination rebound between authorizations.
 
 use super::*;
 
 #[tokio::test]
-#[allow(clippy::too_many_lines)]
 async fn live_chromium_module_never_dials_a_rebound_private_socket() -> tinybus::Result<()> {
-    // Keep both endpoints on assigned loopback addresses and the same port;
-    // the resolver fixture changes only the address returned for fixture.test.
-    let allowed_listener = tokio::net::TcpListener::bind("[::1]:0").await?;
+    let allowed_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
     let port = allowed_listener.local_addr()?.port();
-    let rebound_listener = tokio::net::TcpListener::bind(("127.0.0.1", port)).await?;
+    let rebound_listener =
+        tokio::net::TcpListener::bind((std::net::Ipv6Addr::LOCALHOST, port)).await?;
     let allowed_address = allowed_listener.local_addr()?.to_string();
     let rebound_address = rebound_listener.local_addr()?.to_string();
+    assert_eq!(port, rebound_listener.local_addr()?.port());
+    assert_ne!(allowed_address, rebound_address);
     let extra_connections = Arc::new(AtomicUsize::new(0));
     let (served_tx, served_rx) = tokio::sync::oneshot::channel();
     let server = tokio::spawn(serve_fixture(
@@ -32,16 +32,19 @@ async fn live_chromium_module_never_dials_a_rebound_private_socket() -> tinybus:
     .await?;
 
     let calls_before_rebind = browser.observations.lock().unwrap().clone();
-    let before_rebind_authorizations = calls_before_rebind
-        .iter()
-        .filter(|call| call.starts_with("authorize:fixture-policy:41:fixture.test:"))
-        .count();
     assert!(
         calls_before_rebind
             .iter()
             .any(|call| call == &format!("consume:{allowed_address}")),
         "the initial allowed socket was not consumed: {calls_before_rebind:?}"
     );
+    let before_rebind_authorizations = browser
+        .observations
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|call| call.starts_with("authorize:fixture-policy:41:fixture.test:"))
+        .count();
     let connections_before_rebind = extra_connections.load(Ordering::SeqCst);
     *resolved_address.lock().unwrap() = rebound_address.clone();
     let denied: DesktopResponse = browser
