@@ -171,10 +171,7 @@ impl BrowserDefaults {
                 let expected_egress_keys = 2 + usize::from(
                     cfg!(feature = "test-connector") && egress.contains_key("test_connector_map"),
                 );
-                if egress.len() != expected_egress_keys
-                    || browser.contains_key("args")
-                    || browser.contains_key("executable")
-                {
+                if egress.len() != expected_egress_keys || browser.contains_key("args") {
                     return Err(invalid());
                 }
                 Some(BrowserEgressConfig {

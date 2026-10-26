@@ -186,9 +186,18 @@ fn the_browser_configuration_is_read_or_refused() {
         "egress": {"policy_id": "host-policy", "generation": 7}
     }}))
     .unwrap();
-    assert_eq!(egress_with_executable.executable.as_deref(), Some("/usr/bin/chromium"));
-    assert_eq!(egress_with_executable.egress.as_ref().unwrap().policy_id, "host-policy");
-    assert_eq!(egress_with_executable.egress.as_ref().unwrap().generation, 7);
+    assert_eq!(
+        egress_with_executable.executable.as_deref(),
+        Some("/usr/bin/chromium")
+    );
+    assert_eq!(
+        egress_with_executable.egress.as_ref().unwrap().policy_id,
+        "host-policy"
+    );
+    assert_eq!(
+        egress_with_executable.egress.as_ref().unwrap().generation,
+        7
+    );
     // Settling promptly and opening the browser early are on unless turned
     // off.
     let unset = BrowserDefaults::default();
