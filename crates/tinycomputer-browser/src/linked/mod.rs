@@ -211,7 +211,12 @@ impl Engine for Linked {
 
 fn private_session_id() -> String {
     let mut bytes = [0u8; 24];
-    if getrandom::fill(&mut bytes).is_err() {
+    let entropy_succeeded = getrandom::fill(&mut bytes).is_ok();
+    private_session_id_from_entropy(bytes, entropy_succeeded)
+}
+
+fn private_session_id_from_entropy(bytes: [u8; 24], entropy_succeeded: bool) -> String {
+    if !entropy_succeeded {
         return String::new();
     }
     bytes

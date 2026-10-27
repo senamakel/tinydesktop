@@ -24,6 +24,7 @@ fn browser_callback_contract_has_no_http_payload_or_caller_selected_addresses() 
             "port": 443
         })
     );
+    assert_eq!(format!("{target:?}"), "BrowserEgressTarget([REDACTED])");
     let grant = BrowserEgressGrant {
         generation: 8,
         authorization: "opaque serialized TinySecurity grant".into(),
