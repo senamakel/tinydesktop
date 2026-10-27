@@ -75,7 +75,7 @@ pub struct StartTaskRequest {
     /// hands what its steps read to one reasoning-model pass that returns
     /// JSON in this shape, as `done.result`; absent, a task ends with its
     /// records only.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output: Option<TaskOutput>,
     /// The site the task starts on, a plain host name. When set and the host
     /// serves `SiteMemoryHost`, the module hands the task what finished tasks
@@ -215,7 +215,42 @@ pub struct ContinueTaskRequest {
     /// A free-text answer, for a pause that asked a question — or, for
     /// `needs_human`, `"done"` once the person has finished.
     pub answer: Option<String>,
+    /// Opaque host-issued context to relay unchanged to consequence review.
+    /// This value is not authorization and is never interpreted by the module.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub host_context: Option<HostContext>,
 }
+
+/// Opaque, host-issued context carried from a task continuation to a
+/// `ConsequenceHost` review. The module relays it unchanged and never treats
+/// it as authorization. Debug output deliberately hides the value.
+#[derive(Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct HostContext(String);
+
+impl HostContext {
+    /// Wraps a host-issued opaque context value.
+    #[must_use]
+    pub fn new(value: impl Into<String>) -> Self {
+        Self(value.into())
+    }
+
+    /// Returns the opaque value for host-side lookup.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Debug for HostContext {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("HostContext([opaque])")
+    }
+}
+
+#[cfg(test)]
+#[path = "request_tests.rs"]
+mod tests;
 
 /// A task named in a request.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

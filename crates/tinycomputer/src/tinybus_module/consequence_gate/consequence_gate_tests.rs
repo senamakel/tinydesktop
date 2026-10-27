@@ -60,6 +60,7 @@ fn approval(approve: Option<bool>) -> ContinueTaskRequest {
         inputs: std::collections::BTreeMap::new(),
         approve,
         answer: None,
+        host_context: None,
     }
 }
 
@@ -102,6 +103,25 @@ async fn an_allowed_approval_goes_through() {
     assert_eq!(seen[0].task, "t1");
     assert_eq!(seen[0].target, "Send");
     assert_eq!(seen[0].kind, ConsequenceKind::Irreversible);
+}
+
+#[tokio::test]
+async fn host_context_is_relayed_unchanged_to_consequence_review() {
+    let host = FakeHost::new(Answer::Allow);
+    let link = ConsequenceLink::new(Box::new(host.clone()));
+    let mut request = approval(Some(true));
+    request.host_context = Some(tinycomputer_bus::agent::HostContext::new("host-token"));
+
+    link.screen(&mut request, Some(pending())).await;
+
+    assert_eq!(request.approve, Some(true));
+    assert_eq!(
+        host.seen.lock().unwrap()[0]
+            .host_context
+            .as_ref()
+            .map(tinycomputer_bus::agent::HostContext::as_str),
+        Some("host-token")
+    );
 }
 
 #[tokio::test]
@@ -174,7 +194,7 @@ async fn the_bus_port_reaches_the_hosts_interface() -> tinybus::Result<()> {
     let module = Connection::connect(bus.connect().await?).await?;
 
     let link = ConsequenceLink::new(Box::new(BusPort::new(module)));
-    let verdict = link.review("t1", "pay now", "Pay").await;
+    let verdict = link.review("t1", "pay now", "Pay", None).await;
     assert_eq!(verdict, Verdict::Denied("no".to_owned()));
     assert_eq!(fake.seen.lock().unwrap()[0].kind, ConsequenceKind::Payment);
     Ok(())
@@ -189,6 +209,9 @@ async fn the_bus_port_treats_a_host_that_serves_nothing_as_unreviewed() -> tinyb
     Broker::new().spawn(bus.clone());
     let module = Connection::connect(bus.connect().await?).await?;
     let link = ConsequenceLink::new(Box::new(BusPort::new(module)));
-    assert_eq!(link.review("t1", "send", "Send").await, Verdict::Unreviewed);
+    assert_eq!(
+        link.review("t1", "send", "Send", None).await,
+        Verdict::Unreviewed
+    );
     Ok(())
 }

@@ -30,6 +30,21 @@ pub(crate) struct BrowserDefaults {
     /// drafted (the default), at the one web address the task's text names
     /// if it names one, rather than at its first step.
     pub(crate) prelaunch: bool,
+    /// Private host selected scope for enforcing browser socket egress.
+    pub(crate) egress: Option<BrowserEgressConfig>,
+}
+
+/// Host-selected policy identity and generation; never an agent argument.
+#[derive(Clone, PartialEq, Eq)]
+pub(crate) struct BrowserEgressConfig {
+    pub(crate) policy_id: String,
+    pub(crate) generation: u64,
+}
+
+impl std::fmt::Debug for BrowserEgressConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("BrowserEgressConfig([REDACTED])")
+    }
 }
 
 impl Default for BrowserDefaults {
@@ -41,15 +56,22 @@ impl Default for BrowserDefaults {
             perception: Perception::default(),
             settle: Settle::default(),
             prelaunch: true,
+            egress: None,
         }
     }
 }
 
 impl BrowserDefaults {
     /// Applies the browser defaults decoded from the public module config.
-    pub(crate) fn from_config(config: Option<&BrowserConfig>) -> Self {
+    pub(crate) fn from_config(
+        config: Option<&BrowserConfig>,
+        egress: Option<BrowserEgressConfig>,
+    ) -> Self {
         let Some(config) = config else {
-            return Self::default();
+            return Self {
+                egress,
+                ..Self::default()
+            };
         };
         Self {
             executable: config.executable.clone(),
@@ -64,7 +86,45 @@ impl BrowserDefaults {
                 BrowserSettle::Steady => Settle::Steady,
             },
             prelaunch: config.prelaunch,
+            egress,
         }
+    }
+
+    pub(crate) fn egress_from_raw(
+        config: &serde_json::Value,
+    ) -> Result<Option<BrowserEgressConfig>> {
+        let Some(browser) = config.as_object().and_then(|object| object.get("browser")) else {
+            return Ok(None);
+        };
+        let Some(egress) = browser.as_object().and_then(|object| object.get("egress")) else {
+            return Ok(None);
+        };
+        let invalid = || crate::Error::ConfigFieldType {
+            field: "browser",
+            expected: "an object with a valid private egress policy",
+        };
+        let object = egress.as_object().ok_or_else(invalid)?;
+        let policy_id = object
+            .get("policy_id")
+            .and_then(serde_json::Value::as_str)
+            .filter(|id| !id.is_empty() && id.len() <= 64)
+            .ok_or_else(invalid)?;
+        let generation = object
+            .get("generation")
+            .and_then(serde_json::Value::as_u64)
+            .filter(|generation| *generation > 0)
+            .ok_or_else(invalid)?;
+        if object.len() != 2
+            || browser
+                .as_object()
+                .is_some_and(|browser| browser.contains_key("args"))
+        {
+            return Err(invalid());
+        }
+        Ok(Some(BrowserEgressConfig {
+            policy_id: policy_id.to_owned(),
+            generation,
+        }))
     }
 
     /// `options` with these defaults filled in where the caller left them
