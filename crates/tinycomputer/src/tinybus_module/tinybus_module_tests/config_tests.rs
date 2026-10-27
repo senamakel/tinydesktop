@@ -8,7 +8,7 @@ use tinycomputer_bus::config::ComputerConfig;
 
 fn browser_defaults(config: serde_json::Value) -> crate::tinybus_module::config::BrowserDefaults {
     let config: ComputerConfig = serde_json::from_value(config).expect("typed computer config");
-    crate::tinybus_module::config::BrowserDefaults::from_config(config.browser.as_ref())
+    crate::tinybus_module::config::BrowserDefaults::from_config(config.browser.as_ref(), None)
 }
 
 #[test]
@@ -17,6 +17,36 @@ fn a_malformed_configuration_is_rejected_rather_than_defaulted() {
         .expect_err("a numeric session id is not a session id");
 
     assert!(error.to_string().contains("session_id"));
+}
+
+#[test]
+fn browser_egress_is_private_strict_and_requires_the_host_connection() {
+    let config = json!({"browser":{"egress":{"policy_id":"policy-secret","generation":7}}});
+    let scope = crate::tinybus_module::config::BrowserDefaults::egress_from_raw(&config)
+        .expect("valid host scope")
+        .expect("scope is present");
+    assert_eq!(scope.policy_id, "policy-secret");
+    assert_eq!(scope.generation, 7);
+    assert!(!format!("{scope:?}").contains("policy-secret"));
+    assert!(DesktopService::from_config(&config).is_err());
+    assert!(crate::tinybus_module::config::BrowserDefaults::egress_from_raw(
+        &json!({"browser":{"args":["--proxy-server=http://untrusted"],"egress":{"policy_id":"p","generation":7}}})
+    )
+    .is_err());
+
+    for egress in [
+        json!({"policy_id":"","generation":7}),
+        json!({"policy_id":"p","generation":0}),
+        json!({"policy_id":"p","generation":7,"extra":true}),
+        json!([]),
+    ] {
+        assert!(
+            crate::tinybus_module::config::BrowserDefaults::egress_from_raw(
+                &json!({"browser":{"egress":egress}})
+            )
+            .is_err()
+        );
+    }
 }
 
 #[test]

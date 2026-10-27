@@ -129,13 +129,20 @@ impl ConsequenceLink {
 
     /// Asks the host whether task `task` may go ahead with `action` on
     /// `target`.
-    pub(crate) async fn review(&self, task: &str, action: &str, target: &str) -> Verdict {
+    pub(crate) async fn review(
+        &self,
+        task: &str,
+        action: &str,
+        target: &str,
+        host_context: Option<tinycomputer_bus::agent::HostContext>,
+    ) -> Verdict {
         let kind = kind_of(action, target);
         let request = ReviewActionRequest {
             task: task.to_owned(),
             action: action.to_owned(),
             target: target.to_owned(),
             kind,
+            host_context,
         };
         match self.port.review(request).await {
             Ok(reply) if reply.allow => Verdict::Allowed,
@@ -169,7 +176,15 @@ impl ConsequenceLink {
         let Some((action, target)) = paused else {
             return;
         };
-        if let Verdict::Denied(_) = self.review(&request.id.to_string(), &action, &target).await {
+        if let Verdict::Denied(_) = self
+            .review(
+                &request.id.to_string(),
+                &action,
+                &target,
+                request.host_context.clone(),
+            )
+            .await
+        {
             request.approve = Some(false);
         }
     }

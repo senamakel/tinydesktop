@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use serde::de::DeserializeOwned;
 use tinybus::{Error as TinyBusError, Result as TinyBusResult};
-use tinycomputer_browser::{AgentBrowser, Browser};
+use tinycomputer_browser::{AgentBrowser, Browser, EnforcedAgentBrowser};
 use tinycomputer_bus::agent::{
     AgentResponse, ContinueTaskRequest, StartTaskRequest, SurfaceAvailability, SurfaceKind,
     TaskStatus, TaskView,
@@ -15,6 +15,7 @@ use tinycomputer_bus::{DesktopResponse, JevConfig};
 use tinycomputer_engine as agentic;
 
 use super::DesktopService;
+use crate::tinybus_module::browser_egress::BusAuthorizer;
 use crate::tinybus_module::config::{BrowserDefaults, cursor_config};
 use crate::tinybus_module::consequence_gate::{ConsequenceLink, ConsequencePort};
 use crate::tinybus_module::runner::WorkspaceRunner;
@@ -27,6 +28,14 @@ fn computer_config(config: &serde_json::Value) -> Result<ComputerConfig> {
     if !config.is_null() && config.as_object().is_none() {
         return Err(crate::Error::ConfigNotAnObject);
     }
+    let mut browser_config = config.clone();
+    if let Some(browser) = browser_config
+        .as_object_mut()
+        .and_then(|object| object.get_mut("browser"))
+        .and_then(serde_json::Value::as_object_mut)
+    {
+        browser.remove("egress");
+    }
     Ok(ComputerConfig {
         jev: config_field(config, "jev", "a valid Jev configuration object")?,
         planner: config_field(
@@ -35,7 +44,7 @@ fn computer_config(config: &serde_json::Value) -> Result<ComputerConfig> {
             "a planner configuration object with an api_key and an approved route",
         )?,
         browser: config_field(
-            config,
+            &browser_config,
             "browser",
             "an object with optional executable and browser defaults",
         )?,
@@ -86,8 +95,34 @@ impl DesktopService {
     /// # Errors
     ///
     /// Propagates whatever [`Desktop::from_config`] rejects.
+    #[cfg(test)]
     pub(crate) fn from_config(config: &serde_json::Value) -> Result<Self> {
+        if super::super::config::BrowserDefaults::egress_from_raw(config)?.is_some() {
+            return Err(crate::Error::ConfigFieldType {
+                field: "browser",
+                expected: "a module set up with its authenticated host callback connection",
+            });
+        }
         Self::with_browser(config, Arc::new(Browser::new(Arc::new(AgentBrowser))))
+    }
+
+    /// Builds the service with the host callback connection used by private
+    /// browser egress policy.
+    pub(crate) fn from_config_with_connection(
+        config: &serde_json::Value,
+        connection: tinybus::Connection,
+    ) -> TinyBusResult<Self> {
+        let egress = BrowserDefaults::egress_from_raw(config)
+            .map_err(|error| TinyBusError::failed(error.to_string()))?;
+        let browser = if let Some(egress) = &egress {
+            Arc::new(Browser::new(Arc::new(EnforcedAgentBrowser::new(Arc::new(
+                BusAuthorizer::new(connection, egress.policy_id.clone(), egress.generation),
+            )))))
+        } else {
+            Arc::new(Browser::new(Arc::new(AgentBrowser)))
+        };
+        Self::with_browser_and_defaults(config, browser, egress)
+            .map_err(|error| TinyBusError::failed(error.to_string()))
     }
 
     /// Builds the service from the module configuration blob, opening browser
@@ -96,7 +131,23 @@ impl DesktopService {
     /// # Errors
     ///
     /// Propagates whatever [`Desktop::from_config`] rejects.
+    #[cfg(test)]
     pub(crate) fn with_browser(config: &serde_json::Value, browser: Arc<Browser>) -> Result<Self> {
+        let egress = BrowserDefaults::egress_from_raw(config)?;
+        if egress.is_some() {
+            return Err(crate::Error::ConfigFieldType {
+                field: "browser",
+                expected: "a module set up with its authenticated host callback connection",
+            });
+        }
+        Self::with_browser_and_defaults(config, browser, egress)
+    }
+
+    fn with_browser_and_defaults(
+        config: &serde_json::Value,
+        browser: Arc<Browser>,
+        egress: Option<crate::tinybus_module::config::BrowserEgressConfig>,
+    ) -> Result<Self> {
         let cursor = Arc::new(cursor_config(config)?);
         let computer = computer_config(config)?;
         let desktop =
@@ -128,7 +179,7 @@ impl DesktopService {
                 Ok::<_, crate::Error>((planner, rescuer, shaper))
             })
             .transpose()?;
-        let browser_defaults = BrowserDefaults::from_config(computer.browser.as_ref());
+        let browser_defaults = BrowserDefaults::from_config(computer.browser.as_ref(), egress);
         let mut runner = WorkspaceRunner::new(desktop.clone(), jev.clone(), browser.clone());
         runner.defaults.clone_from(&browser_defaults);
         runner.cursor = cursor;

@@ -31,6 +31,7 @@
 
 mod convert;
 mod deep;
+mod egress;
 mod engine;
 mod error;
 #[cfg(test)]
@@ -44,10 +45,13 @@ mod reply;
 mod sessions;
 mod surface;
 
+#[cfg(feature = "test-connector")]
+pub use egress::TestConnector;
+pub use egress::{BrowserDialTarget, DialGrant, EgressAuthorizer, EgressProxy};
 pub use engine::{Engine, Launcher, Reply};
 pub use error::{Error, Result};
 #[cfg(feature = "agent-browser")]
-pub use linked::AgentBrowser;
+pub use linked::{AgentBrowser, EnforcedAgentBrowser};
 pub use outputs::SWEEP_INTERVAL;
 pub use profile_lock::{claim_profile, in_use as profile_in_use, release as release_profile};
 pub use sessions::{Browser, MAX_SESSIONS};
