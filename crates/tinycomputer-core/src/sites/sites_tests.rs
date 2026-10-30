@@ -85,6 +85,14 @@ fn site_urls_keep_url_parser_idna_and_ip_address_behavior() {
 }
 
 #[test]
+fn site_names_are_derived_from_the_url_authority_only() {
+    assert_eq!(
+        site_of("https://www.shop.test:8443/a/path?next=evil.example#section").as_deref(),
+        Some("shop.test")
+    );
+}
+
+#[test]
 fn goals_are_matched_whatever_their_case_and_spacing() {
     assert_eq!(
         goal_key("  Order   MILK\non shop.test "),
