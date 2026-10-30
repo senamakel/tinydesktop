@@ -22,9 +22,5 @@ publish = false
 thiserror = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-# URL parsing and IDNA normalization for the site-name helpers shared by hosts
-# and the module; this is a pure parser with no transport or I/O.
-url = { workspace = true }
-
 [lints]
 workspace = true
