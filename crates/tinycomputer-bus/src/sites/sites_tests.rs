@@ -2,27 +2,7 @@
 
 #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
 
-use super::{site_named, site_of};
-
-#[test]
-fn site_urls_use_url_idna_and_reject_non_http_and_ip_hosts() {
-    assert_eq!(
-        site_of(" https://www.bücher.example/shop ").as_deref(),
-        Some("xn--bcher-kva.example")
-    );
-    assert_eq!(
-        site_of("http://shop.test:8080/cart").as_deref(),
-        Some("shop.test")
-    );
-    for url in [
-        "ftp://shop.test/",
-        "file:///tmp/page.html",
-        "not a URL",
-        "https://[::1]/",
-    ] {
-        assert_eq!(site_of(url), None, "{url}");
-    }
-}
+use super::site_named;
 
 #[test]
 fn site_names_are_ascii_normalized_and_safe_file_stems() {

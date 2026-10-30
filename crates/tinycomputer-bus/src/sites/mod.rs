@@ -1,16 +1,4 @@
-//! The canonical HTTP(S) site names shared by the host and module.
-
-/// The site `url` belongs to: its host, lower-cased and without a leading
-/// `www.`. Returns `None` for non-HTTP(S) URLs or hosts that cannot safely be
-/// used as a site name.
-#[must_use]
-pub fn site_of(url: &str) -> Option<String> {
-    let parsed = url::Url::parse(url.trim()).ok()?;
-    if !matches!(parsed.scheme(), "http" | "https") {
-        return None;
-    }
-    site_named(parsed.host_str()?)
-}
+//! Plain site-name validation shared by the host and module.
 
 /// `host` as a normalized plain site name, or `None` when it is unsafe.
 ///

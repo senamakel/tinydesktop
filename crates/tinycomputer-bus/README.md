@@ -34,8 +34,9 @@ payload vocabulary has to be published as an ordinary library. This is it.
 | `config`        | the typed load-time configuration shared by hosts and the module    |
 | `sites`         | canonical, strict HTTP(S) site-name normalization                   |
 
-Four dependencies, all pure Rust: `thiserror`, `serde`, `serde_json`, and
-`url`. The URL parser is used only for shared, IDNA-aware site normalization.
+Two dependencies, both pure Rust: `serde` and `serde_json`. The contract keeps
+site names as strings and validates their plain host-name form; URL parsing and
+IDNA normalization live in `tinycomputer-core`.
 
 ## This crate sits underneath `tinycomputer`
 

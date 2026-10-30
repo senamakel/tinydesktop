@@ -28,7 +28,18 @@ use tinycomputer_bus::agent::TaskReport;
 use tinycomputer_bus::site_memory::{SavedHint, SavedPlan, SiteMemory};
 use tinycomputer_bus::{Flow, GroundingHint};
 
-pub use tinycomputer_bus::sites::{site_named, site_of};
+pub use tinycomputer_bus::sites::site_named;
+
+/// The normalized site name in an HTTP(S) URL, or `None` when the URL has no
+/// safe HTTP(S) host.
+#[must_use]
+pub fn site_of(url: &str) -> Option<String> {
+    let parsed = url::Url::parse(url.trim()).ok()?;
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return None;
+    }
+    site_named(parsed.host_str()?)
+}
 
 /// Most elements kept per site; the oldest go first.
 pub const MAX_HINTS: usize = 50;

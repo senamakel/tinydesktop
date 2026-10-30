@@ -22,6 +22,8 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 # Site memory keys a plan by a digest of its facts, so no value is stored.
 sha2 = { workspace = true }
+# Parse browser URLs into the plain site names carried by the bus contract.
+url = { workspace = true }
 
 [lints]
 workspace = true
